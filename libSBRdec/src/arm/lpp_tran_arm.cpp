@@ -92,100 +92,68 @@ www.iis.fraunhofer.de/amm
 amm-info@iis.fraunhofer.de
 ----------------------------------------------------------------------------- */
 
-/******************* MPEG transport format decoder library *********************
+/**************************** SBR decoder library ******************************
 
-   Author(s):   Daniel Homm
+   Author(s):   Arthur Tritthart
 
-   Description:
+   Description: (ARM optimised) LPP transposer subroutines
 
 *******************************************************************************/
 
-#ifndef TPDEC_LATM_H
-#define TPDEC_LATM_H
+#if defined(__arm__)
 
-#include "tpdec_lib.h"
+#define FUNCTION_LPPTRANSPOSER_func1
 
-#include "FDK_bitstream.h"
+#ifdef FUNCTION_LPPTRANSPOSER_func1
 
-#define MIN_LATM_HEADERLENGTH 9
-#define MIN_LOAS_HEADERLENGTH MIN_LATM_HEADERLENGTH + 24 /* both in bits */
-#define MIN_TP_BUF_SIZE_LOAS (8194)
+/* Note: This code requires only 43 cycles per iteration instead of 61 on
+ * ARM926EJ-S */
+static void lppTransposer_func1(FIXP_DBL *lowBandReal, FIXP_DBL *lowBandImag,
+                                FIXP_DBL **qmfBufferReal,
+                                FIXP_DBL **qmfBufferImag, int loops, int hiBand,
+                                int dynamicScale, int descale, FIXP_SGL a0r,
+                                FIXP_SGL a0i, FIXP_SGL a1r, FIXP_SGL a1i,
+                                const int fPreWhitening,
+                                FIXP_DBL preWhiteningGain,
+                                int preWhiteningGains_sf) {
+  FIXP_DBL real1, real2, imag1, imag2, accu1, accu2;
 
-enum {
-  LATM_MAX_PROG = 1,
-  LATM_MAX_LAYER = 1,
-  LATM_MAX_VAR_CHUNKS = 16,
-  LATM_MAX_ID = 16
-};
+  real2 = lowBandReal[-2];
+  real1 = lowBandReal[-1];
+  imag2 = lowBandImag[-2];
+  imag1 = lowBandImag[-1];
+  for (int i = 0; i < loops; i++) {
+    accu1 = fMultDiv2(a0r, real1);
+    accu2 = fMultDiv2(a0i, imag1);
+    accu1 = fMultAddDiv2(accu1, a1r, real2);
+    accu2 = fMultAddDiv2(accu2, a1i, imag2);
+    real2 = fMultDiv2(a1i, real2);
+    accu1 = accu1 - accu2;
+    accu1 = accu1 >> dynamicScale;
 
-typedef struct {
-  UINT m_frameLengthType;
-  UINT m_bufferFullness;
-  UINT m_streamID;
-  UINT m_frameLengthInBits;
-} LATM_LAYER_INFO;
+    accu2 = fMultAddDiv2(real2, a1r, imag2);
+    real2 = real1;
+    imag2 = imag1;
+    accu2 = fMultAddDiv2(accu2, a0i, real1);
+    real1 = lowBandReal[i];
+    accu2 = fMultAddDiv2(accu2, a0r, imag1);
+    imag1 = lowBandImag[i];
+    accu2 = accu2 >> dynamicScale;
 
-typedef struct {
-  LATM_LAYER_INFO m_linfo[LATM_MAX_PROG][LATM_MAX_LAYER];
-  UINT m_taraBufferFullness;
-  UINT m_otherDataLength;
-  UINT m_audioMuxLengthBytes; /* Length of LOAS payload */
+    accu1 <<= 1;
+    accu2 <<= 1;
+    accu1 += (real1 >> descale);
+    accu2 += (imag1 >> descale);
+    if (fPreWhitening) {
+      accu1 = scaleValueSaturate(fMultDiv2(accu1, preWhiteningGain),
+                                 preWhiteningGains_sf);
+      accu2 = scaleValueSaturate(fMultDiv2(accu2, preWhiteningGain),
+                                 preWhiteningGains_sf);
+    }
+    qmfBufferReal[i][hiBand] = accu1;
+    qmfBufferImag[i][hiBand] = accu2;
+  }
+}
+#endif /* #ifdef FUNCTION_LPPTRANSPOSER_func1 */
 
-  UCHAR m_useSameStreamMux;
-  UCHAR m_AudioMuxVersion;
-  UCHAR m_AudioMuxVersionA;
-  UCHAR m_allStreamsSameTimeFraming;
-  UCHAR m_noSubFrames;
-  UCHAR m_numProgram;
-  UCHAR m_numLayer[LATM_MAX_PROG];
-
-  UCHAR m_otherDataPresent;
-  UCHAR m_crcCheckPresent;
-
-  SCHAR BufferFullnessAchieved;
-  UCHAR
-  usacExplicitCfgChanged;      /* explicit config in case of USAC and LOAS/LATM
-                                  must be compared to IPF cfg */
-  UCHAR applyAsc;              /* apply ASC immediate without flushing */
-  UCHAR newCfgHasAudioPreRoll; /* the new (dummy parsed) config has an
-                                  AudioPreRoll */
-} CLatmDemux;
-
-int CLatmDemux_ReadAuChunkLengthInfo(HANDLE_FDK_BITSTREAM bs);
-
-TRANSPORTDEC_ERROR CLatmDemux_Read(HANDLE_FDK_BITSTREAM bs,
-                                   CLatmDemux *pLatmDemux, TRANSPORT_TYPE tt,
-                                   CSTpCallBacks *pTpDecCallbacks,
-                                   CSAudioSpecificConfig *pAsc,
-                                   int *pfConfigFound,
-                                   const INT ignoreBufferFullness);
-
-/**
- * \brief Read StreamMuxConfig
- * \param bs bit stream handle as data source
- * \param pLatmDemux pointer to CLatmDemux struct of current LATM context
- * \param pTpDecCallbacks Call back structure for configuration callbacks
- * \param pAsc pointer to a ASC for configuration storage
- * \param pfConfigFound pointer to a flag which is set to 1 if a configuration
- * was found and processed successfully
- * \param configMode Config modes: memory allocation mode or config change
- * detection mode
- * \param configChanged Indicates a config change
- * \return error code
- */
-TRANSPORTDEC_ERROR CLatmDemux_ReadStreamMuxConfig(
-    HANDLE_FDK_BITSTREAM bs, CLatmDemux *pLatmDemux,
-    CSTpCallBacks *pTpDecCallbacks, CSAudioSpecificConfig *pAsc,
-    int *pfConfigFound, UCHAR configMode, UCHAR configChanged);
-
-TRANSPORTDEC_ERROR CLatmDemux_ReadPayloadLengthInfo(HANDLE_FDK_BITSTREAM bs,
-                                                    CLatmDemux *pLatmDemux);
-
-UINT CLatmDemux_GetFrameLengthInBits(CLatmDemux *pLatmDemux, const UINT prog,
-                                     const UINT layer);
-UINT CLatmDemux_GetOtherDataPresentFlag(CLatmDemux *pLatmDemux);
-UINT CLatmDemux_GetOtherDataLength(CLatmDemux *pLatmDemux);
-UINT CLatmDemux_GetNrOfSubFrames(CLatmDemux *pLatmDemux);
-UINT CLatmDemux_GetNrOfLayers(CLatmDemux *pLatmDemux, const UINT program);
-
-#endif /* TPDEC_LATM_H */
+#endif /* __arm__ */
