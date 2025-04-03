@@ -479,12 +479,6 @@ void CProgramConfig_Read(CProgramConfig *pPce, HANDLE_FDK_BITSTREAM bs,
     pPce->isValid = 0;
   }
 
-  /* Check order of elements according to ISO / IEC 13818 - 7:2003(E),
-   * chapter 8.5.1 */
-  if (CProgramConfig_Check(pPce)) {
-    pPce->isValid = 0;
-  }
-
   for (i = 0; i < commentBytes; i++) {
     UCHAR text;
 
