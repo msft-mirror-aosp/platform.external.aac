@@ -85,6 +85,6 @@ cc_fuzz {
     ],
 
     include_dirs: [
-        "external/aac/libAACenc/"
+        "external/aac/cpp/libAACenc/"
     ],
 }
