@@ -97,6 +97,7 @@ amm-info@iis.fraunhofer.de
 
 #include <string.h>
 #include <math.h>
+#include <stddef.h>
 
 #include "spaceEnclib_const.h"
 
@@ -276,7 +277,6 @@ struct MP4SPACE_ENCODER {
   int bPseudoLr;
   int bPsStyleDmx;
   int speechFlag;
-  float korSpeechGainLast;
 };
 
 static unsigned int const pValidBands[8] = {4, 5, 7, 10, 14, 20, 28, 40};
@@ -290,6 +290,27 @@ mp4SpaceEnc_SpaceTreeSetup(HANDLE_MP4SPACE_ENCODER const hEnc,
 
 static HANDLE_ERROR_INFO
 mp4SpaceEnc_Reset(HANDLE_MP4SPACE_ENCODER const hEnc);
+
+static void mp4SpaceEnc_rotateDmxResToPseudoLR(float *hRe,
+                                               float *hIm);
+
+static void mp4SpaceEnc_MoveBufUmxParamToFront(int ts,
+                                               int delayUmxMat2Mdct,
+                                               int numParamBands,
+                                               float cld[][28],
+                                               float umxMatRe[][28][4],
+                                               float umxMatIm[][28][4],
+                                               int nTimeSlots);
+
+static void mp4SpaceEnc_AddBufUmxParamToEnd(HANDLE_MP4SPACE_ENCODER const hMp4SpaceEnc,
+                                            int ts,
+                                            int delayUmxMat2Mdct,
+                                            float cld[][28],
+                                            float umxMatRe[][28][4],
+                                            float umxMatIm[][28][4],
+                                            int nTimeSlots,
+                                            int const subband2parameterBand[],
+                                            int bPseudoLr);
 
 static HANDLE_ERROR_INFO
 mapTempShapeConfig(TEMPSHAPECONFIG *const outTempShapeConfig,
@@ -345,7 +366,6 @@ mp4SpaceEnc_Reset(HANDLE_MP4SPACE_ENCODER const hEnc) {
     hEnc->bPseudoLr = 0;
     hEnc->bPsStyleDmx = 0;
     hEnc->speechFlag = 0;
-    hEnc->korSpeechGainLast = 1.f;
 
     hEnc->nPredictionBands = 0;
 
@@ -1166,8 +1186,6 @@ mp4SpaceEnc_Encode(
   float ***pppTreeOutputReal = NULL;
   float ***pppTreeOutputImag = NULL;
 
-  int bKorSpeech = 0;
-
   if (error == noError) {
     if (NULL == hMp4SpaceEnc) {
       error = iisUtil_ERROR(CDI, "Invalid Handle");
@@ -1495,27 +1513,6 @@ mp4SpaceEnc_Encode(
     }
     if (hMp4SpaceEnc->avoid_keep > 0) {
       hMp4SpaceEnc->avoid_keep--;
-    }
-  }
-
-  if (hMp4SpaceEnc->residualConfig.mode > 0 && hMp4SpaceEnc->encMode == MP4SPACEENC_USAC_212) {
-    float **ppHybOutResReal = hMp4SpaceEnc->pppHybridOutReal[1];
-    float **ppHybOutResImag = hMp4SpaceEnc->pppHybridOutImag[1];
-    unsigned int hb;
-    float resGain;
-    float resGainOld;
-    float resGainNew = 1.0f;
-
-    resGainOld = hMp4SpaceEnc->korSpeechGainLast;
-    resGainNew = (bKorSpeech) ? 0.0f : 1.0f;
-    hMp4SpaceEnc->korSpeechGainLast = resGainNew;
-
-    for (ts = 0; ts < nFrameTimeSlots; ts++) {
-      resGain = resGainOld + (resGainNew - resGainOld) * (float)(ts + 1) / (nFrameTimeSlots);
-      for (hb = 0; hb < hMp4SpaceEnc->nHybridBands; hb++) {
-        ppHybOutResReal[ts][hb] *= resGain;
-        ppHybOutResImag[ts][hb] *= resGain;
-      }
     }
   }
 
@@ -1884,6 +1881,82 @@ static HANDLE_ERROR_INFO mapBandConfigs(BOX_SUBBAND_CONFIG *const outBandConfig,
   return error;
 }
 
+static void mp4SpaceEnc_rotateDmxResToPseudoLR(float *hRe,
+                                               float *hIm) {
+  float const cos_pi_4 = 1.0f / (float)sqrt(2.0f);
+
+  for (int r = 0; r < 2; ++r) {
+    const float hr0 = hRe[2 * r + 0], hr1 = hRe[2 * r + 1];
+    const float hi0 = hIm[2 * r + 0], hi1 = hIm[2 * r + 1];
+
+    hRe[2 * r + 0] = (hr0 + hr1) * cos_pi_4;
+    hRe[2 * r + 1] = (hr0 - hr1) * cos_pi_4;
+
+    hIm[2 * r + 0] = (hi0 + hi1) * cos_pi_4;
+    hIm[2 * r + 1] = (hi0 - hi1) * cos_pi_4;
+  }
+}
+
+static void mp4SpaceEnc_MoveBufUmxParamToFront(int ts,
+                                               int delayUmxMat2Mdct,
+                                               int numParamBands,
+                                               float cld[][28],
+                                               float umxMatRe[][28][4],
+                                               float umxMatIm[][28][4],
+                                               int nTimeSlots) {
+  int paramBand = 0, inCh = 0, outCh = 0;
+  for (ts = 0; ts < delayUmxMat2Mdct; ts++) {
+    for (paramBand = 0; paramBand < numParamBands; paramBand++) {
+      for (inCh = 0; inCh < 2; inCh++) {
+        for (outCh = 0; outCh < 2; outCh++) {
+          umxMatRe[ts][paramBand][2 * outCh + inCh] = umxMatRe[nTimeSlots + ts][paramBand][2 * outCh + inCh];
+          umxMatIm[ts][paramBand][2 * outCh + inCh] = umxMatIm[nTimeSlots + ts][paramBand][2 * outCh + inCh];
+        }
+      }
+      cld[ts][paramBand] = cld[nTimeSlots + ts][paramBand];
+    }
+  }
+}
+
+static void mp4SpaceEnc_AddBufUmxParamToEnd(HANDLE_MP4SPACE_ENCODER const hMp4SpaceEnc,
+                                            int ts,
+                                            int delayUmxMat2Mdct,
+                                            float cld[][28],
+                                            float umxMatRe[][28][4],
+                                            float umxMatIm[][28][4],
+                                            int nTimeSlots,
+                                            int const subband2parameterBand[],
+                                            int bPseudoLr) {
+  int paramBand = 0, inCh = 0, outCh = 0, hybBand = 0;
+
+  for (ts = 0; ts < nTimeSlots; ts++) {
+    for (hybBand = 0; hybBand < (int)hMp4SpaceEnc->nHybridBands; hybBand++) {
+      paramBand = subband2parameterBand[hybBand];
+      assert(paramBand < (int)hMp4SpaceEnc->nParamBands);
+      for (inCh = 0; inCh < 2; inCh++) {
+        for (outCh = 0; outCh < 2; outCh++) {
+          umxMatRe[delayUmxMat2Mdct + ts][paramBand][2 * outCh + inCh] = hMp4SpaceEnc->ppUmxMatReal[outCh][inCh][ts][hybBand];
+          umxMatIm[delayUmxMat2Mdct + ts][paramBand][2 * outCh + inCh] = hMp4SpaceEnc->ppUmxMatImag[outCh][inCh][ts][hybBand];
+
+          staticGain_ApplyInverseDmxGain(hMp4SpaceEnc->hStaticGain, &(umxMatRe[delayUmxMat2Mdct + ts][paramBand][2 * outCh + inCh]), 1);
+          staticGain_ApplyInverseDmxGain(hMp4SpaceEnc->hStaticGain, &(umxMatIm[delayUmxMat2Mdct + ts][paramBand][2 * outCh + inCh]), 1);
+        }
+      }
+
+      if (paramBand >= (int)(hMp4SpaceEnc->residualConfig.bands[0] + 1)) {
+        umxMatRe[delayUmxMat2Mdct + ts][paramBand][1] = umxMatIm[delayUmxMat2Mdct + ts][paramBand][1] = 0.0f;
+        umxMatRe[delayUmxMat2Mdct + ts][paramBand][3] = umxMatIm[delayUmxMat2Mdct + ts][paramBand][3] = 0.0f;
+      }
+
+      if (bPseudoLr && hMp4SpaceEnc->nOutputChannels == 2) {
+        mp4SpaceEnc_rotateDmxResToPseudoLR(umxMatRe[delayUmxMat2Mdct + ts][paramBand], umxMatIm[delayUmxMat2Mdct + ts][paramBand]);
+      }
+
+      cld[delayUmxMat2Mdct + ts][paramBand] = SpaceTree_GetUniSteCld(hMp4SpaceEnc->hSpaceTree, paramBand);
+    }
+  }
+}
+
 HANDLE_ERROR_INFO
 mp4SpaceEnc_UniSteUpdateFrame(HANDLE_MP4SPACE_ENCODER const hMp4SpaceEnc,
                               float umxMatRe[][28][4],
@@ -1891,11 +1964,9 @@ mp4SpaceEnc_UniSteUpdateFrame(HANDLE_MP4SPACE_ENCODER const hMp4SpaceEnc,
                               float cld[][28],
                               int delayUmxMat2Mdct,
                               int bPseudoLr) {
-  int i;
   HANDLE_ERROR_INFO error = noError;
 
-  int ts, paramBand, i_ch, o_ch;
-  unsigned int hybBand = 0;
+  int ts = 0;
   MPS_MODE mode = MPS_MODE_USAC;
   const int *subband2parameterBand = NULL;
   BOX_SUBBAND_CONFIG nParamBands;
@@ -1910,66 +1981,9 @@ mp4SpaceEnc_UniSteUpdateFrame(HANDLE_MP4SPACE_ENCODER const hMp4SpaceEnc,
   if (error == noError) {
     subband2parameterBand = getSubband2ParameterIndex(nParamBands, mode);
 
-    for (ts = 0; ts < delayUmxMat2Mdct; ts++) {
-      for (paramBand = 0; paramBand < (int)hMp4SpaceEnc->nParamBands; paramBand++) {
-        for (i_ch = 0; i_ch < 2; i_ch++) {
-          for (o_ch = 0; o_ch < 2; o_ch++) {
-            umxMatRe[ts][paramBand][2 * o_ch + i_ch] = umxMatRe[nTimeSlots + ts][paramBand][2 * o_ch + i_ch];
-            umxMatIm[ts][paramBand][2 * o_ch + i_ch] = umxMatIm[nTimeSlots + ts][paramBand][2 * o_ch + i_ch];
-          }
-        }
-        cld[ts][paramBand] = cld[nTimeSlots + ts][paramBand];
-      }
-    }
+    mp4SpaceEnc_MoveBufUmxParamToFront(ts, delayUmxMat2Mdct, (int)hMp4SpaceEnc->nParamBands, cld, umxMatRe, umxMatIm, nTimeSlots);
 
-    for (ts = 0; ts < nTimeSlots; ts++) {
-      for (hybBand = 0; hybBand < hMp4SpaceEnc->nHybridBands; hybBand++) {
-        paramBand = subband2parameterBand[hybBand];
-        assert(paramBand < (int)hMp4SpaceEnc->nParamBands);
-        for (i_ch = 0; i_ch < 2; i_ch++) {
-          for (o_ch = 0; o_ch < 2; o_ch++) {
-            umxMatRe[delayUmxMat2Mdct + ts][paramBand][2 * o_ch + i_ch] = hMp4SpaceEnc->ppUmxMatReal[o_ch][i_ch][ts][hybBand];
-            umxMatIm[delayUmxMat2Mdct + ts][paramBand][2 * o_ch + i_ch] = hMp4SpaceEnc->ppUmxMatImag[o_ch][i_ch][ts][hybBand];
-
-            staticGain_ApplyInverseDmxGain(hMp4SpaceEnc->hStaticGain, &(umxMatRe[delayUmxMat2Mdct + ts][paramBand][2 * o_ch + i_ch]), 1);
-            staticGain_ApplyInverseDmxGain(hMp4SpaceEnc->hStaticGain, &(umxMatIm[delayUmxMat2Mdct + ts][paramBand][2 * o_ch + i_ch]), 1);
-          }
-        }
-
-        if (paramBand >= (int)(hMp4SpaceEnc->residualConfig.bands[0] + 1)) {
-          umxMatRe[delayUmxMat2Mdct + ts][paramBand][1] = umxMatIm[delayUmxMat2Mdct + ts][paramBand][1] = 0.0f;
-          umxMatRe[delayUmxMat2Mdct + ts][paramBand][3] = umxMatIm[delayUmxMat2Mdct + ts][paramBand][3] = 0.0f;
-        }
-
-        if (bPseudoLr && hMp4SpaceEnc->nOutputChannels == 2) {
-          float tmpRe[4];
-          float tmpIm[4];
-
-          const float *hRe = umxMatRe[delayUmxMat2Mdct + ts][paramBand];
-          const float *hIm = umxMatIm[delayUmxMat2Mdct + ts][paramBand];
-          float p[4];
-          p[0] = p[1] = p[2] = 1.0f / (float)sqrt(2.0f);
-          p[3] = -1.0f / (float)sqrt(2.0f);
-
-          tmpRe[0] = hRe[0] * p[0] + hRe[1] * p[2];
-          tmpRe[1] = hRe[0] * p[1] + hRe[1] * p[3];
-          tmpRe[2] = hRe[2] * p[0] + hRe[3] * p[2];
-          tmpRe[3] = hRe[2] * p[1] + hRe[3] * p[3];
-
-          tmpIm[0] = hIm[0] * p[0] + hIm[1] * p[2];
-          tmpIm[1] = hIm[0] * p[1] + hIm[1] * p[3];
-          tmpIm[2] = hIm[2] * p[0] + hIm[3] * p[2];
-          tmpIm[3] = hIm[2] * p[1] + hIm[3] * p[3];
-
-          for (i = 0; i < 4; i++) {
-            umxMatRe[delayUmxMat2Mdct + ts][paramBand][i] = tmpRe[i];
-            umxMatIm[delayUmxMat2Mdct + ts][paramBand][i] = tmpIm[i];
-          }
-        }
-
-        cld[delayUmxMat2Mdct + ts][paramBand] = SpaceTree_GetUniSteCld(hMp4SpaceEnc->hSpaceTree, paramBand);
-      }
-    }
+    mp4SpaceEnc_AddBufUmxParamToEnd(hMp4SpaceEnc, ts, delayUmxMat2Mdct, cld, umxMatRe, umxMatIm, nTimeSlots, subband2parameterBand, bPseudoLr);
   }
   return error;
 }

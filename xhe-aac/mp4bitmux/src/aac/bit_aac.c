@@ -112,6 +112,7 @@ amm-info@iis.fraunhofer.de
 static const int globalGainOffset = 100;
 static const int noiseOffset = 90;
 static const int icsReservedBit = 0;
+#define MAX_PREDICTION_COEF 30
 
 int encodeGlobalGain(BS_SCALEFAC_DATA *scalefacData,
                      int firstSCF,
@@ -239,176 +240,154 @@ int encodeReducedIcsInfo(BLOCK_TYPE blockType,
   return (bitCount);
 }
 
-int countBitsScf(int delta) {
-  return huff_ltabscf[delta + CODE_BOOK_SCF_LAV];
+static int limitToScfLAV(int scf) {
+  if (scf > CODE_BOOK_SCF_LAV) {
+    scf = CODE_BOOK_SCF_LAV;
+  }
+  if (scf < -CODE_BOOK_SCF_LAV) {
+    scf = -CODE_BOOK_SCF_LAV;
+  }
+  return scf;
 }
 
-int encodeCplxPredData(int sfbCnt,
-                       int grpSfb,
-                       int maxSfb,
+int encodeCplxPredData(const int sfbCnt,
+                       const int grpSfb,
+                       const int maxSfb,
                        const int *jsFlag,
-                       const int *predCoeffRe, const int *predCoeffIm,
-                       int *predCoeffPrevRe, int *predCoeffPrevIm,
-                       int *bPredCoeffRealOnly,
-                       int bResetPredictors, int nGroupsPrev,
-                       int wSeq, int wSeqPrev,
-                       int sfbPerPredBand,
-                       int bSwap,
-                       int bUsePrevFrame,
+                       const int *predCoefRe, const int *predCoefIm,
+                       int *predCoefPrevRe, int *predCoefPrevIm,
+                       const int bResetPredictors, const int nGroupsPrev,
+                       const BLOCK_TYPE windowSequence, const BLOCK_TYPE windowSequencePrev,
+                       const int sfbPerPredBand,
+                       const int bUsePrevFrame,
                        HANDLE_BIT_BUF hBitStream,
-                       int const bUsacIndependenceFlag) {
-  int bComplex = 0;
-  int sfbOff = 0;
-  int i = 0;
-  int bitCount = 0;
-  int bDeltaTime = 0;
-  int nBits[2] = {INT_MAX, INT_MAX};
+                       const int bUsacIndependenceFlag) {
+  int bDeltaTimeCoding = 0;
+  int nBitsDeltaFreq = INT_MAX;
+  int nBitsDeltaTime = INT_MAX;
   int deltaRe[2][MAX_GROUPED_SFB] = {{0}};
   int deltaIm[2][MAX_GROUPED_SFB] = {{0}};
-  int huffRe_bits = 0;
-  int huffIm_bits = 0;
+  int bComplex = 0;
+  int sfbOffset = 0;
+  int sfb = 0;
+  int bitCount = 0;
 
   assert(sfbPerPredBand == 2);
 
-  if (((wSeq == SHORT_WINDOW) && (wSeqPrev != SHORT_WINDOW)) ||
-      ((wSeqPrev == SHORT_WINDOW) && (wSeq != SHORT_WINDOW))) {
-    memset(predCoeffPrevRe, 0, MAX_GROUPED_SFB * sizeof(int));
-    memset(predCoeffPrevIm, 0, MAX_GROUPED_SFB * sizeof(int));
+  if (((windowSequence == SHORT_WINDOW) && (windowSequencePrev != SHORT_WINDOW)) ||
+      ((windowSequencePrev == SHORT_WINDOW) && (windowSequence != SHORT_WINDOW))) {
+    setINT(0, predCoefPrevRe, MAX_GROUPED_SFB);
+    setINT(0, predCoefPrevIm, MAX_GROUPED_SFB);
     assert(bResetPredictors == 1);
   }
 
-  for (sfbOff = 0; sfbOff < sfbCnt; sfbOff += grpSfb) {
-    for (i = 0; i < maxSfb; i += sfbPerPredBand) {
-      if (predCoeffIm[sfbOff + i] != 0) {
+  for (sfbOffset = 0; sfbOffset < sfbCnt; sfbOffset += grpSfb) {
+    for (sfb = 0; sfb < maxSfb; sfb += sfbPerPredBand) {
+      if ((abs(predCoefRe[sfbOffset + sfb]) > MAX_PREDICTION_COEF) | (abs(predCoefIm[sfbOffset + sfb]) > MAX_PREDICTION_COEF)) {
+        assert(0);
+        freeErrorTraceback(iisUtil_ERROR(CDI, "Complex prediction encoding out of bound"));
+
+        if (hBitStream == NULL) {
+          return MAX_GROUPED_SFB * huff_ltabscf[2 * CODE_BOOK_SCF_LAV];
+        }
+      }
+
+      if (predCoefIm[sfbOffset + sfb] != 0) {
         bComplex = 1;
       }
     }
   }
 
-  if (bPredCoeffRealOnly != 0) {
-    *bPredCoeffRealOnly = !bComplex;
-  }
-
-  bitCount += WriteBits(hBitStream, bSwap, 1);
-
+  bitCount += WriteBits(hBitStream, bComplex, 1);
   if (bComplex) {
-    bitCount += WriteBits(hBitStream, 1, 1);
     if (bUsacIndependenceFlag == 0) {
       bitCount += WriteBits(hBitStream, bUsePrevFrame, 1);
     }
-  } else {
-    bitCount += WriteBits(hBitStream, 0, 1);
   }
 
-  for (bDeltaTime = 0; bDeltaTime < 2 - bResetPredictors; bDeltaTime++) {
-    nBits[bDeltaTime] = 0;
-    for (sfbOff = 0; sfbOff < sfbCnt; sfbOff += grpSfb) {
-      for (i = 0; i < maxSfb; i += sfbPerPredBand) {
-        if (jsFlag[sfbOff + i]) {
+  for (int codingMethod = 0; codingMethod < (bResetPredictors ? 1 : 2); codingMethod++) {
+    if (codingMethod) {
+      nBitsDeltaTime = 0;
+    } else {
+      nBitsDeltaFreq = 0;
+    }
+
+    for (sfbOffset = 0; sfbOffset < sfbCnt; sfbOffset += grpSfb) {
+      for (sfb = 0; sfb < maxSfb; sfb += sfbPerPredBand) {
+        if (jsFlag[sfbOffset + sfb]) {
           int predRe;
           int predIm;
 
-          if (i != (maxSfb - 1)) {
-            assert(jsFlag[sfbOff + i + (sfbPerPredBand - 1)] == 1);
-          }
-          if (bDeltaTime) {
-            if (sfbOff > 0) {
-              predRe = predCoeffRe[sfbOff - grpSfb + i];
-              predIm = predCoeffIm[sfbOff - grpSfb + i];
-            } else if (wSeq == SHORT_WINDOW && wSeq == wSeqPrev) {
-              assert(sfbOff == 0);
+          assert((sfb == (maxSfb - 1)) || (jsFlag[sfbOffset + sfb + (sfbPerPredBand - 1)] == 1));
 
-              predRe = predCoeffPrevRe[(nGroupsPrev - 1) * grpSfb + i];
-              predIm = predCoeffPrevIm[(nGroupsPrev - 1) * grpSfb + i];
+          if (codingMethod) {
+            if (sfbOffset > 0) {
+              predRe = predCoefRe[sfbOffset + sfb - grpSfb];
+              predIm = predCoefIm[sfbOffset + sfb - grpSfb];
+
+            } else if (windowSequence == SHORT_WINDOW && windowSequence == windowSequencePrev) {
+              assert(sfbOffset == 0);
+
+              predRe = predCoefPrevRe[(nGroupsPrev - 1) * grpSfb + sfb];
+              predIm = predCoefPrevIm[(nGroupsPrev - 1) * grpSfb + sfb];
+
             } else {
-              predRe = predCoeffPrevRe[sfbOff + i];
-              predIm = predCoeffPrevIm[sfbOff + i];
+              predRe = predCoefPrevRe[sfbOffset + sfb];
+              predIm = predCoefPrevIm[sfbOffset + sfb];
+            }
+
+          } else {
+            if (sfb % grpSfb != 0) {
+              predRe = predCoefRe[sfbOffset + sfb - sfbPerPredBand];
+              predIm = predCoefIm[sfbOffset + sfb - sfbPerPredBand];
+            } else {
+              predRe = 0;
+              predIm = 0;
+            }
+          }
+
+          deltaRe[codingMethod][sfbOffset + sfb] = limitToScfLAV(predCoefRe[sfbOffset + sfb] - predRe);
+          deltaIm[codingMethod][sfbOffset + sfb] = limitToScfLAV(predCoefIm[sfbOffset + sfb] - predIm);
+          const int nHuffReBits = huff_ltabscf[deltaRe[codingMethod][sfbOffset + sfb] + CODE_BOOK_SCF_LAV];
+          const int nHuffImBits = huff_ltabscf[deltaIm[codingMethod][sfbOffset + sfb] + CODE_BOOK_SCF_LAV];
+
+          if (codingMethod) {
+            nBitsDeltaTime += nHuffReBits;
+            if (bComplex) {
+              nBitsDeltaTime += nHuffImBits;
             }
           } else {
-            if (i % grpSfb != 0) {
-              predRe = predCoeffRe[sfbOff + i - sfbPerPredBand];
-              predIm = predCoeffIm[sfbOff + i - sfbPerPredBand];
-            } else {
-              predRe = predIm = 0;
-            }
-          }
-
-          deltaRe[bDeltaTime][sfbOff + i] = predCoeffRe[sfbOff + i] - predRe;
-          deltaIm[bDeltaTime][sfbOff + i] = predCoeffIm[sfbOff + i] - predIm;
-
-          huffRe_bits = huff_ltabscf[deltaRe[bDeltaTime][sfbOff + i] + CODE_BOOK_SCF_LAV];
-          huffIm_bits = huff_ltabscf[deltaIm[bDeltaTime][sfbOff + i] + CODE_BOOK_SCF_LAV];
-
-          if (deltaRe[bDeltaTime][sfbOff + i] < -CODE_BOOK_SCF_LAV ||
-              deltaRe[bDeltaTime][sfbOff + i] > CODE_BOOK_SCF_LAV) {
-            nBits[bDeltaTime] = INT_MAX;
-
-            assert(0);
-          }
-
-          if (huffRe_bits > 0 && (nBits[bDeltaTime] <= INT_MAX - huffRe_bits)) {
-            nBits[bDeltaTime] += WriteBits(0, huff_ctabscf[deltaRe[bDeltaTime][sfbOff + i] + CODE_BOOK_SCF_LAV], huffRe_bits);
-          }
-
-          if (bComplex) {
-            if (deltaIm[bDeltaTime][sfbOff + i] < -CODE_BOOK_SCF_LAV ||
-                deltaIm[bDeltaTime][sfbOff + i] > CODE_BOOK_SCF_LAV) {
-              nBits[bDeltaTime] = INT_MAX;
-
-              assert(0);
-            }
-
-            if (huffIm_bits > 0 && (nBits[bDeltaTime] <= INT_MAX - huffIm_bits)) {
-              nBits[bDeltaTime] += WriteBits(0, huff_ctabscf[deltaIm[bDeltaTime][sfbOff + i] + CODE_BOOK_SCF_LAV], huffIm_bits);
+            nBitsDeltaFreq += nHuffReBits;
+            if (bComplex) {
+              nBitsDeltaFreq += nHuffImBits;
             }
           }
         }
       }
     }
   }
+
   if (bUsacIndependenceFlag) {
-    bDeltaTime = 0;
+    bDeltaTimeCoding = 0;
   } else {
-    if (nBits[0] < nBits[1]) {
-      bDeltaTime = 0;
-      bitCount += WriteBits(hBitStream, 0, 1);
+    if (nBitsDeltaFreq < nBitsDeltaTime) {
+      bDeltaTimeCoding = 0;
     } else {
-      bDeltaTime = 1;
-      bitCount += WriteBits(hBitStream, 1, 1);
+      bDeltaTimeCoding = 1;
     }
+    bitCount += WriteBits(hBitStream, bDeltaTimeCoding, 1);
   }
 
-  for (sfbOff = 0; sfbOff < sfbCnt; sfbOff += grpSfb) {
-    for (i = 0; i < maxSfb; i += sfbPerPredBand) {
-      if (jsFlag[sfbOff + i]) {
-        if (deltaRe[bDeltaTime][sfbOff + i] < -CODE_BOOK_SCF_LAV ||
-            deltaRe[bDeltaTime][sfbOff + i] > CODE_BOOK_SCF_LAV) {
-          assert(0);
+  for (sfbOffset = 0; sfbOffset < sfbCnt; sfbOffset += grpSfb) {
+    for (sfb = 0; sfb < maxSfb; sfb += sfbPerPredBand) {
+      if (jsFlag[sfbOffset + sfb]) {
+        const int nHuffReBits = huff_ltabscf[deltaRe[bDeltaTimeCoding][sfbOffset + sfb] + CODE_BOOK_SCF_LAV];
+        const int nHuffImBits = huff_ltabscf[deltaIm[bDeltaTimeCoding][sfbOffset + sfb] + CODE_BOOK_SCF_LAV];
 
-          if (deltaRe[bDeltaTime][sfbOff + i] < -CODE_BOOK_SCF_LAV) {
-            deltaRe[bDeltaTime][sfbOff + i] = -CODE_BOOK_SCF_LAV;
-          } else if (deltaRe[bDeltaTime][sfbOff + i] > CODE_BOOK_SCF_LAV) {
-            deltaRe[bDeltaTime][sfbOff + i] = CODE_BOOK_SCF_LAV;
-          }
-        }
-
-        bitCount += WriteBits(hBitStream, huff_ctabscf[deltaRe[bDeltaTime][sfbOff + i] + CODE_BOOK_SCF_LAV],
-                              huff_ltabscf[deltaRe[bDeltaTime][sfbOff + i] + CODE_BOOK_SCF_LAV]);
+        bitCount += WriteBits(hBitStream, huff_ctabscf[deltaRe[bDeltaTimeCoding][sfbOffset + sfb] + CODE_BOOK_SCF_LAV], nHuffReBits);
 
         if (bComplex) {
-          if (deltaIm[bDeltaTime][sfbOff + i] < -CODE_BOOK_SCF_LAV ||
-              deltaIm[bDeltaTime][sfbOff + i] > CODE_BOOK_SCF_LAV) {
-            assert(0);
-
-            if (deltaIm[bDeltaTime][sfbOff + i] < -CODE_BOOK_SCF_LAV) {
-              deltaIm[bDeltaTime][sfbOff + i] = -CODE_BOOK_SCF_LAV;
-            } else if (deltaIm[bDeltaTime][sfbOff + i] > CODE_BOOK_SCF_LAV) {
-              deltaIm[bDeltaTime][sfbOff + i] = CODE_BOOK_SCF_LAV;
-            }
-          }
-
-          bitCount += WriteBits(hBitStream, huff_ctabscf[deltaIm[bDeltaTime][sfbOff + i] + CODE_BOOK_SCF_LAV],
-                                huff_ltabscf[deltaIm[bDeltaTime][sfbOff + i] + CODE_BOOK_SCF_LAV]);
+          bitCount += WriteBits(hBitStream, huff_ctabscf[deltaIm[bDeltaTimeCoding][sfbOffset + sfb] + CODE_BOOK_SCF_LAV], nHuffImBits);
         }
       }
     }
@@ -478,12 +457,12 @@ int encodeMSInfo(int sfbCnt,
   if (msAllOn) {
     if (bCplxPredActive) {
       bitCount += WriteBits(hBitStream, 1, 1);
+      bitCount += WriteBits(hBitStream, bSwap, 1);
       bitCount += encodeCplxPredData(sfbCnt, grpSfb, maxSfb, jsFlag,
                                      predCoeffRe, predCoeffIm, predCoeffPrevRe, predCoeffPrevIm,
-                                     0, bResetPredictors, nGroupsPrev,
+                                     bResetPredictors, nGroupsPrev,
                                      wSeq, wSeqPrev,
                                      sfbPerPredBand,
-                                     bSwap,
                                      bUsePrevFrame,
                                      hBitStream,
                                      bUsacIndependenceFlag);
@@ -534,12 +513,12 @@ int encodeMSInfo(int sfbCnt,
         }
       }
     }
+    bitCount += WriteBits(hBitStream, bSwap, 1);
     bitCount += encodeCplxPredData(sfbCnt, grpSfb, maxSfb, jsFlag,
                                    predCoeffRe, predCoeffIm, predCoeffPrevRe, predCoeffPrevIm,
-                                   0, bResetPredictors, nGroupsPrev,
+                                   bResetPredictors, nGroupsPrev,
                                    wSeq, wSeqPrev,
                                    sfbPerPredBand,
-                                   bSwap,
                                    bUsePrevFrame,
                                    hBitStream,
                                    bUsacIndependenceFlag);
