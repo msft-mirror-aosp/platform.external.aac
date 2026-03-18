@@ -187,8 +187,7 @@ static XHEAACENCLIB_RETURN drcDelayCalculationAndBufferCreation(
     int codecDelay = *encoderDelay;
     int drcDelay = 0;
 
-    if (
-        mpegD_drc_on && hConfig->bMpeg4DrcOn) {
+    if ((mpegD_drc_on) && hConfig->bMpeg4DrcOn) {
       retValue = XHEAACENCLIB_RETURN_ERROR_CONFIGURATION;
       printErrorConsole(CDI, "MPEG-D DRC and MPEG-4 DRC are not allowed to be active together");
     }
@@ -199,8 +198,7 @@ static XHEAACENCLIB_RETURN drcDelayCalculationAndBufferCreation(
       drcDelayData->drcLookAhead = 0;
     }
 
-    if (!isError(retValue) &&
-        mpegD_drc_on) {
+    if (!isError(retValue) && (mpegD_drc_on)) {
       retValueDrc = iisxHEAACEncLib_drc_get_encoder_delay(hDrc, &drcDelayData->drcEncoderDelay);
       if (retValueDrc != DRC_IFC_NO_ERROR) {
         retValue = XHEAACENCLIB_RETURN_ERROR_DELAY_AND_BUFFER;

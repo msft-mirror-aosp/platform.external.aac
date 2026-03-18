@@ -96,4 +96,4 @@ amm-info@iis.fraunhofer.de
 ----------------------------------------------------------------------------- */
 
 #define IIS_XHEAACENC_LIBRARY_VERSION "AOSP"
-#define IIS_XHEAACENC_VERSION_NUMBER "04.05.09"
+#define IIS_XHEAACENC_VERSION_NUMBER "1.0"

@@ -1396,7 +1396,7 @@ FrameInfoGeneratorSibilant(HANDLE_SBR_ENVELOPE_FRAME hSbrEnvFrame,
     switch (frameClass) {
       case VARFIX:
 
-        calcFillLengthMaxSibi(CODEC_SAAC,
+        calcFillLengthMaxSibi(coreCodec,
                               numberTimeSlots,
                               &fmax);
 

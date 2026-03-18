@@ -98,9 +98,9 @@ amm-info@iis.fraunhofer.de
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
+#include <iisutillib.h>
 #include "iisDRCGainGenerator.h"
 #include "iisDRCGainGeneratorProcess.h"
-#include "iisDRCGainGeneratorMemManager.h"
 
 const float bs1770IntTimeS = 0.032f;
 
@@ -239,18 +239,18 @@ int drcGainGeneratorOpen(HANDLE_DRCGAINGEN_STATES* phIisDRCGainGenStates,
   }
 
   if (*phIisDRCGainGenParams == NULL) {
-    iisDRCGainGenParams = (IisDRCGainGenParams*)MEM_ALLOC(sizeof(struct T_DRCGAINGEN_PARAMS));
+    iisDRCGainGenParams = (IisDRCGainGenParams*)iisCalloc(1, sizeof(struct T_DRCGAINGEN_PARAMS));
     if (iisDRCGainGenParams == NULL) {
       return -3;
     }
     iisDRCGainGenParams->frameSize = pConfig_drcGainGen->frameSize;
     if (numGainBandSequencesTmp != 0) {
-      iisDRCGainGenParams->iisDRCGainGenParamsInstance = (IisDRCGainGenParamsInstance*)MEM_ALLOC(numGainBandSequencesTmp * sizeof(struct T_DRCGAINGEN_PARAMSINSTANCE));
+      iisDRCGainGenParams->iisDRCGainGenParamsInstance = (IisDRCGainGenParamsInstance*)iisCalloc(numGainBandSequencesTmp, sizeof(struct T_DRCGAINGEN_PARAMSINSTANCE));
     } else {
       iisDRCGainGenParams->iisDRCGainGenParamsInstance = NULL;
     }
     for (k = 0; k < numGainBandSequencesTmp; k++) {
-      iisDRCGainGenParams->iisDRCGainGenParamsInstance[k].channelWeight = (float*)MEM_ALLOC(maxChannelCount * sizeof(float));
+      iisDRCGainGenParams->iisDRCGainGenParamsInstance[k].channelWeight = (float*)iisCalloc(maxChannelCount, sizeof(float));
       iisDRCGainGenParams->iisDRCGainGenParamsInstance[k].drcLevelCalculationMode = pConfig_drcGainGen->drcLevelCalculationMode[k];
     }
   }
@@ -265,7 +265,7 @@ int drcGainGeneratorOpen(HANDLE_DRCGAINGEN_STATES* phIisDRCGainGenStates,
   iisDRCGainGenParams->numExtParamsDefined = 0;
 
   if (iisDRCGainGenParams->iisDRCGainGenExtParams == NULL && pConfig_drcGainGen->numExtParams > 0) {
-    iisDRCGainGenParams->iisDRCGainGenExtParams = (IisDRCGainGenExtParams*)MEM_ALLOC(pConfig_drcGainGen->numExtParams * sizeof(struct T_DRCGAINGEN_EXTPARAMS));
+    iisDRCGainGenParams->iisDRCGainGenExtParams = (IisDRCGainGenExtParams*)iisCalloc(pConfig_drcGainGen->numExtParams, sizeof(struct T_DRCGAINGEN_EXTPARAMS));
   }
 
   for (n = 0; n < pConfig_drcGainGen->sequenceCount; n++) {
@@ -328,57 +328,57 @@ int drcGainGeneratorOpen(HANDLE_DRCGAINGEN_STATES* phIisDRCGainGenStates,
   }
 
   if (*phIisDRCGainGenStates == NULL) {
-    iisDRCGainGenStates = (IisDRCGainGenStates*)MEM_ALLOC(sizeof(struct T_DRCGAINGEN_STATES));
+    iisDRCGainGenStates = (IisDRCGainGenStates*)iisCalloc(1, sizeof(struct T_DRCGAINGEN_STATES));
     if (iisDRCGainGenStates == NULL) {
       return -3;
     }
-    iisDRCGainGenStates->iisDRCGainGenStatesInstance = (IisDRCGainGenStatesInstance*)MEM_ALLOC(numGainBandSequencesTmp * sizeof(struct T_DRCGAINGEN_STATESINSTANCE));
-    iisDRCGainGenStates->audioBufferApplyDelayPointer = (float**)MEM_ALLOC(maxChannelCount * sizeof(float*));
+    iisDRCGainGenStates->iisDRCGainGenStatesInstance = (IisDRCGainGenStatesInstance*)iisCalloc(numGainBandSequencesTmp, sizeof(struct T_DRCGAINGEN_STATESINSTANCE));
+    iisDRCGainGenStates->audioBufferApplyDelayPointer = (float**)iisCalloc(maxChannelCount, sizeof(float*));
 
     for (k = 0; k < numGainBandSequencesTmp; k++) {
-      iisDRCGainGenStates->iisDRCGainGenStatesInstance[k].levelDb = (float*)MEM_ALLOC(pConfig_drcGainGen->frameSize * sizeof(float));
+      iisDRCGainGenStates->iisDRCGainGenStatesInstance[k].levelDb = (float*)iisCalloc(pConfig_drcGainGen->frameSize, sizeof(float));
 
-      iisDRCGainGenStates->iisDRCGainGenStatesInstance[k].iisDRCGainGenLevelCalcStates_BS1770Int.int_y1 = (float*)MEM_ALLOC(numChannelsTmp[k] * sizeof(float));
-      iisDRCGainGenStates->iisDRCGainGenStatesInstance[k].iisDRCGainGenLevelCalcStates_BS1770Int.ySum = (float*)MEM_ALLOC(pConfig_drcGainGen->frameSize * sizeof(float));
+      iisDRCGainGenStates->iisDRCGainGenStatesInstance[k].iisDRCGainGenLevelCalcStates_BS1770Int.int_y1 = (float*)iisCalloc(numChannelsTmp[k], sizeof(float));
+      iisDRCGainGenStates->iisDRCGainGenStatesInstance[k].iisDRCGainGenLevelCalcStates_BS1770Int.ySum = (float*)iisCalloc(pConfig_drcGainGen->frameSize, sizeof(float));
     }
   }
 
   {
-    iisDRCGainGenParams->iisDRCGainGenLevelCalcParams_BS1770Filter = (IisDRCGainGenLevelCalcParams_BS1770Filter*)MEM_ALLOC(numLevelEstimInstances * sizeof(struct T_DRCGAINGEN_PARAMSINSTANCE));
-    iisDRCGainGenStates->iisDRCGainGenLevelCalcStates_BS1770Filter = (IisDRCGainGenLevelCalcStates_BS1770Filter*)MEM_ALLOC(numLevelEstimInstances * sizeof(struct T_DRCGAINGENSTATE_LEVELCALCBS1770FILTER));
+    iisDRCGainGenParams->iisDRCGainGenLevelCalcParams_BS1770Filter = (IisDRCGainGenLevelCalcParams_BS1770Filter*)iisCalloc(numLevelEstimInstances, sizeof(struct T_DRCGAINGEN_PARAMSINSTANCE));
+    iisDRCGainGenStates->iisDRCGainGenLevelCalcStates_BS1770Filter = (IisDRCGainGenLevelCalcStates_BS1770Filter*)iisCalloc(numLevelEstimInstances, sizeof(struct T_DRCGAINGENSTATE_LEVELCALCBS1770FILTER));
 
-    iisDRCGainGenStates->audioWithGainApplied = (float**)MEM_ALLOC(maxChannelCount * sizeof(float*));
+    iisDRCGainGenStates->audioWithGainApplied = (float**)iisCalloc(maxChannelCount, sizeof(float*));
     for (m = 0; m < maxChannelCount; m++) {
-      iisDRCGainGenStates->audioWithGainApplied[m] = (float*)MEM_ALLOC(pConfig_drcGainGen->frameSize * sizeof(float));
+      iisDRCGainGenStates->audioWithGainApplied[m] = (float*)iisCalloc(pConfig_drcGainGen->frameSize, sizeof(float));
     }
     for (k = 0; k < numLevelEstimInstances; k++) {
       iisDRCGainGenParams->iisDRCGainGenLevelCalcParams_BS1770Filter[k].frameSize = pConfig_drcGainGen->frameSize;
       iisDRCGainGenParams->iisDRCGainGenLevelCalcParams_BS1770Filter[k].numChannels = numInputChannelsLevEstim[k];
 
-      iisDRCGainGenStates->iisDRCGainGenLevelCalcStates_BS1770Filter[k].pre_x1 = (float*)MEM_ALLOC(maxChannelCount * sizeof(float));
-      iisDRCGainGenStates->iisDRCGainGenLevelCalcStates_BS1770Filter[k].pre_x2 = (float*)MEM_ALLOC(maxChannelCount * sizeof(float));
-      iisDRCGainGenStates->iisDRCGainGenLevelCalcStates_BS1770Filter[k].pre_y1 = (float*)MEM_ALLOC(maxChannelCount * sizeof(float));
-      iisDRCGainGenStates->iisDRCGainGenLevelCalcStates_BS1770Filter[k].pre_y2 = (float*)MEM_ALLOC(maxChannelCount * sizeof(float));
-      iisDRCGainGenStates->iisDRCGainGenLevelCalcStates_BS1770Filter[k].rlb_x1 = (float*)MEM_ALLOC(maxChannelCount * sizeof(float));
-      iisDRCGainGenStates->iisDRCGainGenLevelCalcStates_BS1770Filter[k].rlb_x2 = (float*)MEM_ALLOC(maxChannelCount * sizeof(float));
-      iisDRCGainGenStates->iisDRCGainGenLevelCalcStates_BS1770Filter[k].rlb_y1 = (float*)MEM_ALLOC(maxChannelCount * sizeof(float));
-      iisDRCGainGenStates->iisDRCGainGenLevelCalcStates_BS1770Filter[k].rlb_y2 = (float*)MEM_ALLOC(maxChannelCount * sizeof(float));
-      iisDRCGainGenStates->iisDRCGainGenLevelCalcStates_BS1770Filter[k].xSquare = (float**)MEM_ALLOC(maxChannelCount * sizeof(float*));
+      iisDRCGainGenStates->iisDRCGainGenLevelCalcStates_BS1770Filter[k].pre_x1 = (float*)iisCalloc(maxChannelCount, sizeof(float));
+      iisDRCGainGenStates->iisDRCGainGenLevelCalcStates_BS1770Filter[k].pre_x2 = (float*)iisCalloc(maxChannelCount, sizeof(float));
+      iisDRCGainGenStates->iisDRCGainGenLevelCalcStates_BS1770Filter[k].pre_y1 = (float*)iisCalloc(maxChannelCount, sizeof(float));
+      iisDRCGainGenStates->iisDRCGainGenLevelCalcStates_BS1770Filter[k].pre_y2 = (float*)iisCalloc(maxChannelCount, sizeof(float));
+      iisDRCGainGenStates->iisDRCGainGenLevelCalcStates_BS1770Filter[k].rlb_x1 = (float*)iisCalloc(maxChannelCount, sizeof(float));
+      iisDRCGainGenStates->iisDRCGainGenLevelCalcStates_BS1770Filter[k].rlb_x2 = (float*)iisCalloc(maxChannelCount, sizeof(float));
+      iisDRCGainGenStates->iisDRCGainGenLevelCalcStates_BS1770Filter[k].rlb_y1 = (float*)iisCalloc(maxChannelCount, sizeof(float));
+      iisDRCGainGenStates->iisDRCGainGenLevelCalcStates_BS1770Filter[k].rlb_y2 = (float*)iisCalloc(maxChannelCount, sizeof(float));
+      iisDRCGainGenStates->iisDRCGainGenLevelCalcStates_BS1770Filter[k].xSquare = (float**)iisCalloc(maxChannelCount, sizeof(float*));
       for (m = 0; m < maxChannelCount; m++) {
-        iisDRCGainGenStates->iisDRCGainGenLevelCalcStates_BS1770Filter[k].xSquare[m] = (float*)MEM_ALLOC((pConfig_drcGainGen->frameSize + iisDRCGainGenParams->maxLookaheadSamples) * sizeof(float));
+        iisDRCGainGenStates->iisDRCGainGenLevelCalcStates_BS1770Filter[k].xSquare[m] = (float*)iisCalloc((pConfig_drcGainGen->frameSize + iisDRCGainGenParams->maxLookaheadSamples), sizeof(float));
       }
 
       iisDRCGainGenParams->iisDRCGainGenLevelCalcParams_BS1770Filter[k].applyExternalDrcGains = applyExternalDrcGains[k];
       if (applyExternalDrcGains[k]) {
-        iisDRCGainGenStates->iisDRCGainGenLevelCalcStates_BS1770Filter[k].externalGain = (float*)MEM_ALLOC((pConfig_drcGainGen->frameSize + iisDRCGainGenParams->maxLookaheadSamples) * sizeof(float));
+        iisDRCGainGenStates->iisDRCGainGenLevelCalcStates_BS1770Filter[k].externalGain = (float*)iisCalloc((pConfig_drcGainGen->frameSize + iisDRCGainGenParams->maxLookaheadSamples), sizeof(float));
       }
     }
   }
 
   if (pConfig_drcGainGen->useProcessWrapper) {
-    iisDRCGainGenStates->audioInWithLookahead = (float**)MEM_ALLOC(maxChannelCount * sizeof(float*));
+    iisDRCGainGenStates->audioInWithLookahead = (float**)iisCalloc(maxChannelCount, sizeof(float*));
     for (m = 0; m < maxChannelCount; m++) {
-      iisDRCGainGenStates->audioInWithLookahead[m] = (float*)MEM_ALLOC((pConfig_drcGainGen->frameSize + iisDRCGainGenParams->maxLookaheadSamples) * sizeof(float));
+      iisDRCGainGenStates->audioInWithLookahead[m] = (float*)iisCalloc((pConfig_drcGainGen->frameSize + iisDRCGainGenParams->maxLookaheadSamples), sizeof(float));
     }
   }
 
@@ -842,108 +842,108 @@ int drcGainGeneratorClose(HANDLE_DRCGAINGEN_STATES* phIisDRCGainGenStates,
   if (*phIisDRCGainGenStates != NULL) {
     for (k = 0; k < (*phIisDRCGainGenParams)->numGainBandSequences; k++) {
       if ((*phIisDRCGainGenStates)->iisDRCGainGenStatesInstance[k].levelDb != NULL) {
-        MEM_FREE((*phIisDRCGainGenStates)->iisDRCGainGenStatesInstance[k].levelDb);
+        iisFree((*phIisDRCGainGenStates)->iisDRCGainGenStatesInstance[k].levelDb);
         (*phIisDRCGainGenStates)->iisDRCGainGenStatesInstance[k].levelDb = NULL;
       }
 
       if ((*phIisDRCGainGenStates)->iisDRCGainGenStatesInstance[k].iisDRCGainGenLevelCalcStates_BS1770Int.int_y1 != NULL) {
-        MEM_FREE((*phIisDRCGainGenStates)->iisDRCGainGenStatesInstance[k].iisDRCGainGenLevelCalcStates_BS1770Int.int_y1);
+        iisFree((*phIisDRCGainGenStates)->iisDRCGainGenStatesInstance[k].iisDRCGainGenLevelCalcStates_BS1770Int.int_y1);
         (*phIisDRCGainGenStates)->iisDRCGainGenStatesInstance[k].iisDRCGainGenLevelCalcStates_BS1770Int.int_y1 = NULL;
       }
       if ((*phIisDRCGainGenStates)->iisDRCGainGenStatesInstance[k].iisDRCGainGenLevelCalcStates_BS1770Int.ySum != NULL) {
-        MEM_FREE((*phIisDRCGainGenStates)->iisDRCGainGenStatesInstance[k].iisDRCGainGenLevelCalcStates_BS1770Int.ySum);
+        iisFree((*phIisDRCGainGenStates)->iisDRCGainGenStatesInstance[k].iisDRCGainGenLevelCalcStates_BS1770Int.ySum);
         (*phIisDRCGainGenStates)->iisDRCGainGenStatesInstance[k].iisDRCGainGenLevelCalcStates_BS1770Int.ySum = NULL;
       }
     }
 
     for (k = 0; k < (*phIisDRCGainGenParams)->numLevelEstimInstances; k++) {
       if ((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].pre_x1 != NULL) {
-        MEM_FREE((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].pre_x1);
+        iisFree((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].pre_x1);
         (*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].pre_x1 = NULL;
       }
       if ((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].pre_x2 != NULL) {
-        MEM_FREE((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].pre_x2);
+        iisFree((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].pre_x2);
         (*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].pre_x2 = NULL;
       }
       if ((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].pre_y1 != NULL) {
-        MEM_FREE((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].pre_y1);
+        iisFree((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].pre_y1);
         (*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].pre_y1 = NULL;
       }
       if ((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].pre_y2 != NULL) {
-        MEM_FREE((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].pre_y2);
+        iisFree((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].pre_y2);
         (*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].pre_y2 = NULL;
       }
       if ((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].rlb_x1 != NULL) {
-        MEM_FREE((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].rlb_x1);
+        iisFree((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].rlb_x1);
         (*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].rlb_x1 = NULL;
       }
       if ((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].rlb_x2 != NULL) {
-        MEM_FREE((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].rlb_x2);
+        iisFree((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].rlb_x2);
         (*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].rlb_x2 = NULL;
       }
       if ((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].rlb_y1 != NULL) {
-        MEM_FREE((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].rlb_y1);
+        iisFree((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].rlb_y1);
         (*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].rlb_y1 = NULL;
       }
       if ((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].rlb_y2 != NULL) {
-        MEM_FREE((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].rlb_y2);
+        iisFree((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].rlb_y2);
         (*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].rlb_y2 = NULL;
       }
       for (m = 0; m < (*phIisDRCGainGenParams)->maxChannelCount; m++) {
         if ((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].xSquare[m] != NULL) {
-          MEM_FREE((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].xSquare[m]);
+          iisFree((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].xSquare[m]);
           (*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].xSquare[m] = NULL;
         }
       }
       if ((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].xSquare != NULL) {
-        MEM_FREE((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].xSquare);
+        iisFree((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].xSquare);
         (*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].xSquare = NULL;
       }
       if ((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].externalGain != NULL) {
-        MEM_FREE((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].externalGain);
+        iisFree((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].externalGain);
         (*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter[k].externalGain = NULL;
       }
     }
 
     for (m = 0; m < (*phIisDRCGainGenParams)->maxChannelCount; m++) {
       if ((*phIisDRCGainGenStates)->audioWithGainApplied[m] != NULL) {
-        MEM_FREE((*phIisDRCGainGenStates)->audioWithGainApplied[m]);
+        iisFree((*phIisDRCGainGenStates)->audioWithGainApplied[m]);
         (*phIisDRCGainGenStates)->audioWithGainApplied[m] = NULL;
       }
     }
     if ((*phIisDRCGainGenStates)->audioWithGainApplied != NULL) {
-      MEM_FREE((*phIisDRCGainGenStates)->audioWithGainApplied);
+      iisFree((*phIisDRCGainGenStates)->audioWithGainApplied);
       (*phIisDRCGainGenStates)->audioWithGainApplied = NULL;
     }
 
     if ((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter != NULL) {
-      MEM_FREE((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter);
+      iisFree((*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter);
       (*phIisDRCGainGenStates)->iisDRCGainGenLevelCalcStates_BS1770Filter = NULL;
     }
 
     if ((*phIisDRCGainGenStates)->iisDRCGainGenStatesInstance != NULL) {
-      MEM_FREE((*phIisDRCGainGenStates)->iisDRCGainGenStatesInstance);
+      iisFree((*phIisDRCGainGenStates)->iisDRCGainGenStatesInstance);
       (*phIisDRCGainGenStates)->iisDRCGainGenStatesInstance = NULL;
     }
     if ((*phIisDRCGainGenStates)->audioBufferApplyDelayPointer != NULL) {
-      MEM_FREE((*phIisDRCGainGenStates)->audioBufferApplyDelayPointer);
+      iisFree((*phIisDRCGainGenStates)->audioBufferApplyDelayPointer);
       (*phIisDRCGainGenStates)->audioBufferApplyDelayPointer = NULL;
     }
 
     if ((*phIisDRCGainGenStates)->audioInWithLookahead != NULL) {
       for (m = 0; m < (*phIisDRCGainGenParams)->maxChannelCount; m++) {
         if ((*phIisDRCGainGenStates)->audioInWithLookahead[m] != NULL) {
-          MEM_FREE((*phIisDRCGainGenStates)->audioInWithLookahead[m]);
+          iisFree((*phIisDRCGainGenStates)->audioInWithLookahead[m]);
           (*phIisDRCGainGenStates)->audioInWithLookahead[m] = NULL;
         }
       }
 
-      MEM_FREE((*phIisDRCGainGenStates)->audioInWithLookahead);
+      iisFree((*phIisDRCGainGenStates)->audioInWithLookahead);
       (*phIisDRCGainGenStates)->audioInWithLookahead = NULL;
     }
 
     if ((*phIisDRCGainGenStates) != NULL) {
-      MEM_FREE(*phIisDRCGainGenStates);
+      iisFree(*phIisDRCGainGenStates);
       *phIisDRCGainGenStates = NULL;
     }
   }
@@ -952,26 +952,26 @@ int drcGainGeneratorClose(HANDLE_DRCGAINGEN_STATES* phIisDRCGainGenStates,
     for (k = 0; k < (*phIisDRCGainGenParams)->numGainBandSequences; k++) {
       if ((*phIisDRCGainGenParams)->iisDRCGainGenParamsInstance != NULL) {
         if ((*phIisDRCGainGenParams)->iisDRCGainGenParamsInstance[k].channelWeight != NULL) {
-          MEM_FREE((*phIisDRCGainGenParams)->iisDRCGainGenParamsInstance[k].channelWeight);
+          iisFree((*phIisDRCGainGenParams)->iisDRCGainGenParamsInstance[k].channelWeight);
           (*phIisDRCGainGenParams)->iisDRCGainGenParamsInstance[k].channelWeight = NULL;
         }
       }
     }
 
     if ((*phIisDRCGainGenParams)->iisDRCGainGenLevelCalcParams_BS1770Filter != NULL) {
-      MEM_FREE((*phIisDRCGainGenParams)->iisDRCGainGenLevelCalcParams_BS1770Filter);
+      iisFree((*phIisDRCGainGenParams)->iisDRCGainGenLevelCalcParams_BS1770Filter);
       (*phIisDRCGainGenParams)->iisDRCGainGenLevelCalcParams_BS1770Filter = NULL;
     }
     if ((*phIisDRCGainGenParams)->iisDRCGainGenParamsInstance != NULL) {
-      MEM_FREE((*phIisDRCGainGenParams)->iisDRCGainGenParamsInstance);
+      iisFree((*phIisDRCGainGenParams)->iisDRCGainGenParamsInstance);
       (*phIisDRCGainGenParams)->iisDRCGainGenParamsInstance = NULL;
     }
     if ((*phIisDRCGainGenParams)->iisDRCGainGenExtParams != NULL) {
-      MEM_FREE((*phIisDRCGainGenParams)->iisDRCGainGenExtParams);
+      iisFree((*phIisDRCGainGenParams)->iisDRCGainGenExtParams);
       (*phIisDRCGainGenParams)->iisDRCGainGenExtParams = NULL;
     }
     if (*phIisDRCGainGenParams != NULL) {
-      MEM_FREE(*phIisDRCGainGenParams);
+      iisFree(*phIisDRCGainGenParams);
       *phIisDRCGainGenParams = NULL;
     }
   }

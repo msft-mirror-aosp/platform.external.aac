@@ -106,9 +106,27 @@ amm-info@iis.fraunhofer.de
 #include "space_paramextract.h"
 #include "space_tree.h"
 
+#if defined __GNUC__ || defined __clang__
+#define ABSTEREOSPEECH __attribute__((unused))
+#else
+#define ABSTEREOSPEECH
+#endif
+
 #define HYBRID_RESOLUTION 141
 #define HYBRID_RESOLUTION_USAC 77
 #define MAX_NRG_COMP_RATIO 1.e-5f
+#define LIMIT(x) (((x) > 1) ? 1 : ((x) < 0) ? 0 \
+                                            : (x))
+#define DB_TO_LINEAR(x) ((float)pow(10.0f, (x) / 20.0f))
+
+#define COSF(x) ((float)cos(x))
+#define ACOSF(x) ((float)acos(x))
+#define SINF(x) ((float)sin(x))
+#define TANF(x) ((float)tan(x))
+#define ATANF(x) ((float)atan(x))
+#define SQRTF(x) ((float)sqrt(x))
+#define LOGF(x) ((float)log(x))
+#define POWF(x, y) ((float)pow((x), (y)))
 
 static HANDLE_ERROR_INFO paramextract_calculateUsacDmx(HANDLE_TTO_BOX hTtoBox,
                                                        float **ppHybridDataReal1,
@@ -212,8 +230,6 @@ typedef struct T_TTO_BOX {
 
   float epsilonFloat;
   int nTimeSlotsMax;
-
-  int bKorSpeech;
 
 } TTO_BOX;
 
@@ -728,22 +744,23 @@ static int getIccCorrelationCoherenceBorder(BOX_SUBBAND_CONFIG subbandConfig, in
   return iccCorrelationCoherenceBorder;
 }
 
-static void alignParameterBandsWithSbrXover(int *pSubband2ParameterAnalysisIndex, int nHybBandsCore) {
-  int n;
-  for (n = nHybBandsCore - 1; n > 0; n--) {
-    if (pSubband2ParameterAnalysisIndex[n] != pSubband2ParameterAnalysisIndex[n - 1]) {
-      pSubband2ParameterAnalysisIndex[n] = pSubband2ParameterAnalysisIndex[n - 1];
-    } else {
-      break;
-    }
+static void alignParameterBandsWithSbrXover(int *pSubband2ParameterAnalysisIndex, const int nHybBandsCore, const int nParamBands) {
+  int lastSubband = nHybBandsCore - 1;
+
+  if ((pSubband2ParameterAnalysisIndex[lastSubband] != pSubband2ParameterAnalysisIndex[lastSubband - 1]) &&
+      (pSubband2ParameterAnalysisIndex[lastSubband] == pSubband2ParameterAnalysisIndex[lastSubband + 1])) {
+    pSubband2ParameterAnalysisIndex[lastSubband] = pSubband2ParameterAnalysisIndex[lastSubband - 1];
   }
 
-  for (n = nHybBandsCore - 1; n < HYBRID_RESOLUTION_USAC; n++) {
-    if (pSubband2ParameterAnalysisIndex[nHybBandsCore - 1] == pSubband2ParameterAnalysisIndex[n + 1]) {
-      pSubband2ParameterAnalysisIndex[n + 1] = pSubband2ParameterAnalysisIndex[nHybBandsCore - 1] + 1;
-    } else {
-      break;
-    }
+  if (pSubband2ParameterAnalysisIndex[lastSubband] == nParamBands - 1) {
+    return;
+  }
+  int band = nHybBandsCore;
+  while (
+      (band < HYBRID_RESOLUTION_USAC) &&
+      (pSubband2ParameterAnalysisIndex[lastSubband] == pSubband2ParameterAnalysisIndex[band])) {
+    pSubband2ParameterAnalysisIndex[band] = pSubband2ParameterAnalysisIndex[lastSubband] + 1;
+    band++;
   }
 }
 
@@ -856,7 +873,7 @@ HANDLE_ERROR_INFO CreateTtoBox(
     if ((*hTtoBox)->bStereoSbr && (*hTtoBox)->bCalcResiduals) {
       memcpy((*hTtoBox)->pSubband2ParameterAnalysisIndex, (*hTtoBox)->pSubband2ParameterIndex, HYBRID_RESOLUTION_USAC * sizeof(int));
 
-      alignParameterBandsWithSbrXover((*hTtoBox)->pSubband2ParameterAnalysisIndex, (*hTtoBox)->nHybBandsCore);
+      alignParameterBandsWithSbrXover((*hTtoBox)->pSubband2ParameterAnalysisIndex, (*hTtoBox)->nHybBandsCore, (*hTtoBox)->nParameterBands);
     }
   }
 
@@ -1226,10 +1243,10 @@ static HANDLE_ERROR_INFO calculateIcc(
   if (error == noError) {
     if (pIcc != NULL) {
       for (i = 0; i < correlationCoherenceBorder; i++) {
-        pIcc[i] = min(pProdReal[i] / (float)sqrt(pPwr1[i] * pPwr2[i]), 1.f);
+        pIcc[i] = min(pProdReal[i] / SQRTF(pPwr1[i] * pPwr2[i]), 1.f);
       }
       for (; i < nParamBand; i++) {
-        pIcc[i] = min((float)sqrt((pProdReal[i] * pProdReal[i] + pProdImag[i] * pProdImag[i]) / (pPwr1[i] * pPwr2[i])), 1.f);
+        pIcc[i] = min(SQRTF((pProdReal[i] * pProdReal[i] + pProdImag[i] * pProdImag[i]) / (pPwr1[i] * pPwr2[i])), 1.f);
       }
     } else {
       error = iisUtil_ERROR(CDI, "Invalid pointer to pIcc");
@@ -1241,57 +1258,6 @@ static HANDLE_ERROR_INFO calculateIcc(
   }
 
   return error;
-}
-
-static int koreanDetector(HANDLE_TTO_BOX hTtoBox, int numIpdBands, int speechFlag) {
-  int pb, i;
-  float iccCor[MAX_NUM_BINS] = {0};
-
-  const float maxIccThr = 0.51f;
-  const float maxIpdThr = -0.72f;
-  const float minCldThr = 3.33f;
-
-  float meanIcc = 0;
-  float meanIpd = 0;
-  float minAbsCld = 0;
-
-  int bKorSpeech;
-  const int nPrev = 10;
-
-  float *cld = hTtoBox->pCld;
-  float *icc = hTtoBox->pIcc;
-  float *ipd = hTtoBox->pIpd;
-
-  for (pb = 0; pb < numIpdBands; pb++) {
-    iccCor[pb] = icc[pb] * (float)cos(ipd[pb]);
-  }
-
-  meanIpd = (ipd[1] + ipd[2]) / 2;
-
-  meanIcc = (iccCor[2] + iccCor[3] + iccCor[4]) / 3;
-
-  minAbsCld = max(((float)fabs(cld[0]) + (float)fabs(cld[1])) / 2, ((float)fabs(cld[2]) + (float)fabs(cld[3])) / 2);
-
-  if ((speechFlag) &&
-      (meanIpd < maxIpdThr) &&
-      (meanIcc < maxIccThr) &&
-      (minAbsCld > minCldThr)) {
-    bKorSpeech = 1;
-  } else {
-    bKorSpeech = 0;
-  }
-
-  hTtoBox->prevResult[hTtoBox->frameCount] = bKorSpeech;
-  for (i = 0; i < nPrev; i++) {
-    if (hTtoBox->prevResult[i] == 0) {
-      bKorSpeech = 0;
-      break;
-    }
-  }
-
-  hTtoBox->frameCount++;
-  hTtoBox->frameCount = hTtoBox->frameCount % nPrev;
-  return bKorSpeech;
 }
 
 void QuantizeCoef(
@@ -1352,17 +1318,17 @@ void deQuantizeCoef(
     const int nBands,
     const float *quantTable,
     const int idxOffset,
-    float *dequantOut) {
+    float *deQuantOut) {
   int band;
 
   for (band = 0; band < nBands; band++) {
-    dequantOut[band] = quantTable[input[band] + idxOffset];
+    deQuantOut[band] = quantTable[input[band] + idxOffset];
   }
 
   return;
 }
 
-HANDLE_ERROR_INFO CalculateCld(
+HANDLE_ERROR_INFO calculateCld(
     int const nParamBand,
     float const *const pPwr1,
     float const *const pPwr2,
@@ -1391,13 +1357,13 @@ static HANDLE_ERROR_INFO calculateIpd(
   HANDLE_ERROR_INFO error = noError;
   int i;
 
-  if (pIpd == NULL) {
-    error = iisUtil_ERROR(CDI, "Invalid pointer to pIpd");
-  }
-
   if (error == noError) {
-    for (i = 0; i < nParamBand; i++) {
-      pIpd[i] = (float)atan2(pProdImag[i], pProdReal[i]);
+    if (pIpd != NULL) {
+      for (i = 0; i < nParamBand; i++) {
+        pIpd[i] = (float)atan2(pProdImag[i], pProdReal[i]);
+      }
+    } else {
+      error = iisUtil_ERROR(CDI, "Invalid pointer to pIpd");
     }
   }
 
@@ -1423,50 +1389,31 @@ static int getIpdQuantSteps(const int quantMode) {
 
 static void quantizeIpd(const float *input,
                         const int nBands,
-                        const int quantMode,
+                        int nQuantSteps,
                         int *quantOut) {
-  int nQuantSteps = getIpdQuantSteps(quantMode);
-  int pb;
+  int paramBand;
 
-  for (pb = 0; pb < nBands; pb++) {
-    float ipd = (float)fmod(input[pb] + 2 * PI, 2 * PI);
+  for (paramBand = 0; paramBand < nBands; paramBand++) {
+    float ipd = (float)fmod(input[paramBand] + 2 * PI, 2 * PI);
     float index = ipd * nQuantSteps / (2 * PI);
 
-    quantOut[pb] = (int)floor(index + 0.5f);
+    quantOut[paramBand] = (int)floor(index + 0.5f);
 
-    if (quantOut[pb] == nQuantSteps) {
-      quantOut[pb] = 0;
+    if (quantOut[paramBand] == nQuantSteps) {
+      quantOut[paramBand] = 0;
     }
   }
 }
 
 static void deQuantizeIpd(const int *input,
                           const int nBands,
-                          const int quantMode,
-                          float *dequantOut) {
-  int nQuantSteps = getIpdQuantSteps(quantMode);
-  int pb;
+                          const int nQuantSteps,
+                          float *deQuantOut) {
+  int paramBand;
 
-  for (pb = 0; pb < nBands; pb++) {
-    dequantOut[pb] = input[pb] * 2 * PI / nQuantSteps;
+  for (paramBand = 0; paramBand < nBands; paramBand++) {
+    deQuantOut[paramBand] = input[paramBand] * 2 * PI / nQuantSteps;
   }
-}
-
-static int avoidPredictionSingularityClassic(const float *pCld,
-                                             int *pCldIdx,
-                                             const int band) {
-  int requantize = 0;
-
-  if (pCldIdx[band] == 0) {
-    if (pCld[band] >= 0.0f) {
-      pCldIdx[band] = 1;
-    } else {
-      pCldIdx[band] = -1;
-    }
-    requantize = 1;
-  }
-
-  return requantize;
 }
 
 static void avoidPredictionSingularity(HANDLE_TTO_BOX hTtoBox,
@@ -1474,13 +1421,21 @@ static void avoidPredictionSingularity(HANDLE_TTO_BOX hTtoBox,
                                        int *pIccIdx,
                                        int *pIpdIdx) {
   int nPhaseBands = hTtoBox->nOttBandsPhase;
+  const float *pCld = hTtoBox->pCld;
   int antiPhase = getIpdQuantSteps(hTtoBox->bUseCoarseQuantIpd) / 2;
   int requantize = 0;
-  int pb;
+  int requantize_val = 1;
+  int paramBand;
 
-  for (pb = 0; pb < nPhaseBands; pb++) {
-    if ((pIccIdx[pb] == 0) && (pIpdIdx[pb] == antiPhase)) {
-      requantize |= avoidPredictionSingularityClassic(hTtoBox->pCld, pCldIdx, pb);
+  for (paramBand = 0; paramBand < nPhaseBands; paramBand++) {
+    if ((pIccIdx[paramBand] == 0) && (pIpdIdx[paramBand] == antiPhase)) {
+      if (pCldIdx[paramBand] == 0) {
+        pCldIdx[paramBand] = (pCld[paramBand] >= 0.0f) ? 1 : -1;
+        requantize_val = 1;
+      } else {
+        requantize_val = 0;
+      }
+      requantize |= requantize_val;
     }
   }
 
@@ -1488,9 +1443,6 @@ static void avoidPredictionSingularity(HANDLE_TTO_BOX hTtoBox,
     deQuantizeCoef(pCldIdx, nPhaseBands, hTtoBox->pCldQuantTableDec, hTtoBox->nCldQuantOffset, hTtoBox->pCldQuant);
   }
 }
-
-#define LIMIT(x) (((x) > 1) ? 1 : ((x) < 0) ? 0 \
-                                            : (x))
 
 static int ipdDetector(HANDLE_TTO_BOX hTtoBox, float *pPwr1, float *pPwr2, int numIpdBands) {
   float *cld = hTtoBox->pCld;
@@ -1531,7 +1483,7 @@ static int ipdDetector(HANDLE_TTO_BOX hTtoBox, float *pPwr1, float *pPwr2, int n
     rIcc = LIMIT((icc[i] - iccRelev0) / (iccRelev1 - iccRelev0));
 
     rIpd = LIMIT(((float)fabs(ipd[i]) - ipdRelev0) / (ipdRelev1 - ipdRelev0));
-    rIpd = (float)sqrt(rIpd);
+    rIpd = SQRTF(rIpd);
 
     rIpd = (rIpd + .1f) / 1.1f;
 
@@ -1542,7 +1494,6 @@ static int ipdDetector(HANDLE_TTO_BOX hTtoBox, float *pPwr1, float *pPwr2, int n
     tmp = rCld * rIcc * rIpd * rNrg;
     if (tmp > rMax) rMax = tmp;
   }
-
   result = hTtoBox->prevIpdDecision;
 
   if ((rAvg > thrAvgHigh) || (rMax > thrMaxHigh)) {
@@ -1561,13 +1512,11 @@ static int applyPhaseCorrections(HANDLE_TTO_BOX hTtoBox,
                                  int *pIpdIdx,
                                  int bUseBBCues) {
   int nPhaseBands = hTtoBox->nOttBandsPhase;
-  int nParamBands = hTtoBox->nParameterBands;
   int quantMode = hTtoBox->bUseCoarseQuantIpd;
   float *powerHybridData1 = hTtoBox->pPwrHybridData1;
   float *powerHybridData2 = hTtoBox->pPwrHybridData2;
   int dominantPhase = 1;
   int phaseMode = 0;
-  int pb;
 
   if (hTtoBox->ipdMode == IPDMODE_RESIDUAL) {
     avoidPredictionSingularity(hTtoBox, pCldIdx, pIccIdx, pIpdIdx);
@@ -1578,32 +1527,32 @@ static int applyPhaseCorrections(HANDLE_TTO_BOX hTtoBox,
   }
 
   if ((dominantPhase) && (nPhaseBands > 0)) {
-    switch (quantMode) {
-      case 0:
-        phaseMode = 3;
-        break;
-      case 1:
-        phaseMode = 2;
-        break;
+    if (quantMode == 0) {
+      phaseMode = 3;
+    } else if (quantMode == 1) {
+      phaseMode = 2;
     }
   } else {
-    float *iccCoh;
-    float *iccCor;
+    float *coherence;
+    float *correlation;
     float *ipd;
+    int paramBand;
+    int nParamBands = hTtoBox->nParameterBands;
+    int nQuantSteps = getIpdQuantSteps(quantMode);
 
     if (hTtoBox->bCalcResiduals) {
-      iccCoh = hTtoBox->pIccQuant;
-      iccCor = hTtoBox->pIcc;
+      coherence = hTtoBox->pIccQuant;
+      correlation = hTtoBox->pIcc;
       ipd = hTtoBox->pIpdQuant;
     } else {
-      iccCoh = hTtoBox->pIcc;
-      iccCor = hTtoBox->pIcc;
+      coherence = hTtoBox->pIcc;
+      correlation = hTtoBox->pIcc;
       ipd = hTtoBox->pIpd;
     }
 
-    for (pb = 0; pb < nPhaseBands; pb++) {
-      iccCor[pb] = iccCoh[pb] * (float)cos(ipd[pb]);
-      pIpdIdx[pb] = 0;
+    for (paramBand = 0; paramBand < nPhaseBands; paramBand++) {
+      correlation[paramBand] = coherence[paramBand] * COSF(ipd[paramBand]);
+      pIpdIdx[paramBand] = 0;
     }
 
     if (bUseBBCues) {
@@ -1618,31 +1567,31 @@ static int applyPhaseCorrections(HANDLE_TTO_BOX hTtoBox,
 
       QuantizeCoef(hTtoBox->pIcc, nParamBands, hTtoBox->pIccQuantTable, hTtoBox->nIccQuantOffset, hTtoBox->nIccQuantSteps, pIccIdx);
       deQuantizeCoef(pIccIdx, nParamBands, hTtoBox->pIccQuantTable, hTtoBox->nIccQuantOffset, hTtoBox->pIccQuant);
-      deQuantizeIpd(pIpdIdx, nParamBands, quantMode, hTtoBox->pIpdQuant);
+      deQuantizeIpd(pIpdIdx, nParamBands, nQuantSteps, hTtoBox->pIpdQuant);
     } else {
       QuantizeCoef(hTtoBox->pIcc, nPhaseBands, hTtoBox->pIccQuantTable, hTtoBox->nIccQuantOffset, hTtoBox->nIccQuantSteps, pIccIdx);
       deQuantizeCoef(pIccIdx, nPhaseBands, hTtoBox->pIccQuantTable, hTtoBox->nIccQuantOffset, hTtoBox->pIccQuant);
-      deQuantizeIpd(pIpdIdx, nPhaseBands, quantMode, hTtoBox->pIpdQuant);
+      deQuantizeIpd(pIpdIdx, nPhaseBands, nQuantSteps, hTtoBox->pIpdQuant);
     }
   }
 
   return phaseMode;
 }
 
-static void getClassicDownmixWeightsPar(int startBand,
-                                        int stopBand,
-                                        float *cld,
-                                        float *icc,
-                                        float maxWeight,
-                                        CPLX *cplxWeight1,
-                                        CPLX *cplxWeight2) {
+static void getDownmixWeightsPar(int startBand,
+                                 int stopBand,
+                                 float *cld,
+                                 float *icc,
+                                 float maxWeight,
+                                 CPLX *cplxWeight1,
+                                 CPLX *cplxWeight2) {
   int i;
 
   for (i = startBand; i < stopBand; i++) {
-    float cldLin = (float)pow(10.0f, cld[i] / 20.0f);
+    float cldLin = DB_TO_LINEAR(cld[i]);
     float cldLin21 = cldLin * cldLin + 1.0f;
 
-    cplxWeight1[i].real = (float)sqrt(cldLin21 / (cldLin21 + 2.0f * icc[i] * cldLin));
+    cplxWeight1[i].real = SQRTF(cldLin21 / (cldLin21 + 2.0f * icc[i] * cldLin));
     cplxWeight1[i].real = min(maxWeight, cplxWeight1[i].real);
     cplxWeight1[i].imag = 0.0f;
     cplxWeight2[i].real = cplxWeight1[i].real;
@@ -1663,11 +1612,11 @@ static void getCoherentDownmixWeightsHyb(HANDLE_TTO_BOX hTtoBox,
   float *prodHybridReal = hTtoBox->pProdHybridReal;
   float *prodHybridImag = hTtoBox->pProdHybridImag;
   float powerSum, prodAbs, ratio, gain1, gain2, powerDmx;
-  int i, pb;
+  int i, paramBand;
 
   for (i = 0; i < nHybridBands; i++) {
-    pb = hTtoBox->pSubband2ParameterIndex[i];
-    if ((pb < startBand) || (pb >= stopBand)) {
+    paramBand = hTtoBox->pSubband2ParameterIndex[i];
+    if ((paramBand < startBand) || (paramBand >= stopBand)) {
       continue;
     }
 
@@ -1675,9 +1624,9 @@ static void getCoherentDownmixWeightsHyb(HANDLE_TTO_BOX hTtoBox,
     prodAbs = prodHybridReal[i] * prodHybridReal[i] +
               prodHybridImag[i] * prodHybridImag[i];
     ratio = (powerSum + 2.0f * prodHybridReal[i]) /
-            (powerSum + 2.0f * (float)sqrt(prodAbs));
+            (powerSum + 2.0f * SQRTF(prodAbs));
 
-    gain2 = (float)pow(max(ratio, 0.0f), 0.25f);
+    gain2 = POWF(max(ratio, 0.0f), 0.25f);
     gain1 = 2.0f - gain2;
 
     powerDmx = gain1 * gain1 * powerHybrid1[i];
@@ -1686,20 +1635,18 @@ static void getCoherentDownmixWeightsHyb(HANDLE_TTO_BOX hTtoBox,
 
     powerSum = max(powerSum, FLOAT_EPSILON);
     powerDmx = max(powerDmx, MAX_NRG_COMP_RATIO * powerSum);
+    double power_rms = sqrt(powerSum / powerDmx);
 
-    cplxWeight1[i].real = (float)sqrt(powerSum / powerDmx);
-    cplxWeight2[i].real = cplxWeight1[i].real;
+    cplxWeight1[i].real = (float)(power_rms)*gain1;
+    cplxWeight2[i].real = (float)(power_rms)*gain2;
     cplxWeight1[i].imag = 0.0f;
     cplxWeight2[i].imag = 0.0f;
 
-    cplxWeight1[i].real *= gain1;
-    cplxWeight2[i].real *= gain2;
-
     if (cplxWeight3 != NULL) {
-      cplxWeight3[i].real = (float)(1.0f / (sqrt(powerSum / powerDmx)));
+      cplxWeight3[i].real = (float)(1.0f / power_rms);
     }
     if (cplxWeight4 != NULL) {
-      cplxWeight4[i].real = (float)(1.0f / (sqrt(powerSum / powerDmx)));
+      cplxWeight4[i].real = (float)(1.0f / power_rms);
     }
   }
 }
@@ -1717,16 +1664,14 @@ static void getResidualWeightsPar(int startBand,
 
   for (i = startBand; i < stopBand; i++) {
     float tmp1, tmp2;
-    float cldLin, cldLin2, iccClip;
+    float cldLin2;
     float alphaR, alphaI;
-
-    cldLin = (float)pow(10.0f, cld[i] / 20.0f);
+    float cldLin = DB_TO_LINEAR(cld[i]);
     cldLin2 = cldLin * cldLin;
-    iccClip = max(-0.99f, icc[i]);
-    tmp1 = 2.0f * iccClip * cldLin;
-    tmp2 = cldLin2 + 1.0f + tmp1 * (float)cos(ipd[i]);
+    tmp1 = 2.0f * max(-0.99f, icc[i]) * cldLin;
+    tmp2 = cldLin2 + 1.0f + tmp1 * COSF(ipd[i]);
     alphaR = (1.0f - cldLin2) / tmp2;
-    alphaI = -tmp1 * (float)sin(ipd[i]) / tmp2;
+    alphaI = -tmp1 * SINF(ipd[i]) / tmp2;
 
     cplxWeight3[i].real = cplxWeight2[i].real + alphaR * cplxWeight1[i].real;
     cplxWeight3[i].imag = alphaI * cplxWeight1[i].real;
@@ -1744,43 +1689,91 @@ static void getResidualWeightsHyb(HANDLE_TTO_BOX hTtoBox,
                                   CPLX *cplxWeight1,
                                   CPLX *cplxWeight2,
                                   CPLX *cplxWeight3,
-                                  CPLX *cplxWeight4) {
+                                  CPLX *cplxWeight4)
+
+{
   int i;
-  int pb;
+  int paramBand;
 
   for (i = 0; i < nHybridBands; i++) {
-    pb = hTtoBox->pSubband2ParameterIndex[i];
-    if ((pb < startBand) || (pb >= stopBand)) {
+    paramBand = hTtoBox->pSubband2ParameterIndex[i];
+    if ((paramBand < startBand) || (paramBand >= stopBand)) {
       continue;
     }
-    {
-      float resGain = 1.0f;
 
-      float max_inv_det = 1.2f;
-      float iid_lin = (float)(pow(10, (cld[pb] / 20.0f)));
-      float c_l = (float)(sqrt((iid_lin * iid_lin) / (1 + (iid_lin * iid_lin))));
-      float c_r = (float)(sqrt(1 / (1 + (iid_lin * iid_lin))));
-      float iccCorrLim = max(icc[pb], (1 / (max_inv_det * max_inv_det) - 1.0f) * (iid_lin + 1.0f / iid_lin) / 2.0f);
-      float alpha = (float)(0.5f * acos(iccCorrLim));
-      float beta = (float)(atan(tan(alpha) * (c_r - c_l) / (c_r + c_l)));
-      float H11 = (float)(c_l * cos(alpha + beta));
-      float H21 = (float)(c_r * cos(-alpha + beta));
-      float H12_res = max(0.5f, H11);
-      float H22_res = -max(0.5f, H21);
-      float w1 = cplxWeight1[i].real;
-      float w2 = cplxWeight2[i].real;
+    float resGain = 1.0f;
+    float cldLin = DB_TO_LINEAR(cld[paramBand]);
+    float max_inv_det = 1.2f;
+    float cldLin2 = (float)(cldLin * cldLin);
+    float c_l = SQRTF((cldLin2) / (1 + (cldLin2)));
+    float c_r = SQRTF(1 / (1 + (cldLin2)));
+    float iccCorrLim = max(icc[paramBand], (1 / (max_inv_det * max_inv_det) - 1.0f) * (cldLin + 1.0f / cldLin) / 2.0f);
+    float alpha = (float)(0.5f * acos(iccCorrLim));
+    float beta = ATANF(tan(alpha) * (c_r - c_l) / (c_r + c_l));
 
-      cplxWeight3[i].real *= resGain * (((1 - H11 * w1) / H12_res) - (H21 * w1 / H22_res)) / 2.0f;
-      cplxWeight3[i].imag = 0;
-      cplxWeight4[i].real *= resGain * (((1 - H21 * w2) / H22_res) - (H11 * w2 / H12_res)) / 2.0f;
-      cplxWeight4[i].imag = 0;
-    }
+    float H11 = (float)(c_l * cos(alpha + beta));
+    float H21 = (float)(c_r * cos(-alpha + beta));
+    float H12_res = max(0.5f, H11);
+    float H22_res = -max(0.5f, H21);
+    float w1 = cplxWeight1[i].real;
+    float w2 = cplxWeight2[i].real;
+
+    cplxWeight3[i].real *= resGain * (((1 - H11 * w1) / H12_res) - (H21 * w1 / H22_res)) / 2.0f;
+    cplxWeight3[i].imag = 0;
+    cplxWeight4[i].real *= resGain * (((1 - H21 * w2) / H22_res) - (H11 * w2 / H12_res)) / 2.0f;
+    cplxWeight4[i].imag = 0;
   }
 }
 
-static HANDLE_ERROR_INFO calculateTtoDownmixParamUsac(
-    HANDLE_TTO_BOX hTtoBox,
-    int nHybridBands) {
+static void getClassicWeights(HANDLE_TTO_BOX hTtoBox,
+                              int resBand,
+                              int stopBand,
+                              float *cld,
+                              float *icc,
+                              CPLX *cplxWeight1,
+                              CPLX *cplxWeight2,
+                              CPLX *cplxWeight3,
+                              CPLX *cplxWeight4) {
+  int paramBand;
+  const float maxWeight = 1.2f;
+  const float iccMin = 0.5f * (1.0f / (maxWeight * maxWeight) - 1.0f);
+  float alpha, beta;
+  float tmp1, tmp2, tmp3;
+  float cldLin1;
+  float iccLim;
+  float *cldRes = hTtoBox->pCldQuant;
+  float *iccRes = hTtoBox->pIccDownmixQuant;
+  ;
+  for (paramBand = 0; paramBand < stopBand; paramBand++) {
+    if (paramBand == resBand) {
+      cldRes = cld;
+      iccRes = icc;
+    }
+    float cldLin = DB_TO_LINEAR(cldRes[paramBand]);
+    cldLin1 = cldLin + 1.0f / cldLin;
+    tmp1 = iccMin * cldLin1;
+    iccLim = max(tmp1, iccRes[paramBand]);
+    tmp1 = SQRTF(cldLin / cldLin1);
+    tmp2 = 1.0f / SQRTF(cldLin * cldLin1);
+    tmp3 = 1.0f / (cplxWeight3[paramBand].real - cplxWeight4[paramBand].real);
+
+    alpha = 0.5f * ACOSF(iccLim);
+    beta = ATANF((TANF(alpha)) * (tmp2 - tmp1) / (tmp2 + tmp1));
+
+    cplxWeight1[paramBand].real = max(0.0f, tmp3);
+    cplxWeight2[paramBand].real = cplxWeight1[paramBand].real;
+    cplxWeight3[paramBand].real = (tmp2 * COSF(beta - alpha)) * cplxWeight1[paramBand].real;
+    cplxWeight4[paramBand].real = (-tmp1 * COSF(beta + alpha)) * cplxWeight1[paramBand].real;
+
+    cplxWeight3[paramBand].real *= 2.0f;
+    cplxWeight3[paramBand].imag *= 2.0f;
+    cplxWeight4[paramBand].real *= 2.0f;
+    cplxWeight4[paramBand].imag *= 2.0f;
+  }
+}
+
+static HANDLE_ERROR_INFO calculateTtoDownmixParamUsac(HANDLE_TTO_BOX hTtoBox,
+                                                      int nHybridBands) {
   HANDLE_ERROR_INFO error = noError;
 
   int nParamBands = hTtoBox->nParameterBands;
@@ -1801,6 +1794,7 @@ static HANDLE_ERROR_INFO calculateTtoDownmixParamUsac(
   CPLX *cplxWeight4 = hTtoBox->pCplxDmWeight4;
 
   int i;
+  float maxWeight = 1.2f;
 
   if (NULL == icc || NULL == cld || NULL == cplxWeight1 || NULL == cplxWeight2) {
     error = iisUtil_ERROR(CDI, "Parameter error.");
@@ -1812,8 +1806,6 @@ static HANDLE_ERROR_INFO calculateTtoDownmixParamUsac(
 
   if (noError == error) {
     if (bCalcResiduals) {
-      const float maxWeight = 1.2f;
-
       float *cldRes = cldQuant;
       float *iccRes = iccQuant;
       float *ipdRes = ipdQuant;
@@ -1822,72 +1814,41 @@ static HANDLE_ERROR_INFO calculateTtoDownmixParamUsac(
 
       if (hTtoBox->ipdMode != IPDMODE_NONE) {
         for (i = 0; i < nResidualBands; i++) {
-          correlation[i] = iccRes[i] * (float)cos(ipdRes[i]);
+          correlation[i] = iccRes[i] * COSF(ipdRes[i]);
         }
         coherence = iccRes;
         iccRes = correlation;
       }
 
       if (hTtoBox->ipdMode == IPDMODE_RESIDUAL) {
-        getClassicDownmixWeightsPar(0, nResidualBands, cldRes, iccRes, maxWeight, cplxWeight1, cplxWeight2);
+        getDownmixWeightsPar(0, nResidualBands, cldRes, iccRes, maxWeight, cplxWeight1, cplxWeight2);
         getResidualWeightsPar(0, nResidualBands, cldRes, coherence, ipdRes, cplxWeight1, cplxWeight2, cplxWeight3, cplxWeight4);
 
-        if (hTtoBox->downmixType == DOWNMIXTYPE_CLASSICMPS) {
-          getClassicDownmixWeightsPar(nResidualBands, nParamBands, cld, icc, maxWeight, cplxWeight1, cplxWeight2);
-          getResidualWeightsPar(nResidualBands, nParamBands, cld, icc, ipd, cplxWeight1, cplxWeight2, cplxWeight3, cplxWeight4);
-        } else if (hTtoBox->downmixType == DOWNMIXTYPE_SIMPLIFIED_ABOVE_RESIDUAL) {
-          getCoherentDownmixWeightsHyb(hTtoBox, nHybridBands, nResidualBands, nParamBands, cplxWeight1, cplxWeight2, cplxWeight3, cplxWeight4);
-          getResidualWeightsHyb(hTtoBox, nHybridBands, nResidualBands, nParamBands, cld, icc, cplxWeight1, cplxWeight2, cplxWeight3, cplxWeight4);
-        }
+        switch (hTtoBox->downmixType) {
+          case DOWNMIXTYPE_CLASSICMPS:
+            getDownmixWeightsPar(nResidualBands, nParamBands, cld, icc, maxWeight, cplxWeight1, cplxWeight2);
+            getResidualWeightsPar(nResidualBands, nParamBands, cld, icc, ipd, cplxWeight1, cplxWeight2, cplxWeight3, cplxWeight4);
+            break;
 
+          case DOWNMIXTYPE_SIMPLIFIED_ABOVE_RESIDUAL:
+            getCoherentDownmixWeightsHyb(hTtoBox, nHybridBands, nResidualBands, nParamBands, cplxWeight1, cplxWeight2, cplxWeight3, cplxWeight4);
+            getResidualWeightsHyb(hTtoBox, nHybridBands, nResidualBands, nParamBands, cld, icc, cplxWeight1, cplxWeight2, cplxWeight3, cplxWeight4);
+            break;
+          default:
+            error = iisUtil_ERROR(CDI, "Invalid downmixType");
+            break;
+        }
       } else {
-        const float minIcc = 0.5f * (1.0f / (maxWeight * maxWeight) - 1.0f);
-
-        for (i = 0; i < nParamBands; i++) {
-          float alpha, beta;
-          float tmp1, tmp2;
-          float iccLim;
-          float cldLin;
-          float cldLin1;
-
-          if (i == nResidualBands) {
-            cldRes = cld;
-            iccRes = icc;
-          }
-
-          cldLin = (float)pow(10, cldRes[i] / 20.0f);
-          cldLin1 = cldLin + 1.0f / cldLin;
-
-          tmp1 = minIcc * cldLin1;
-          iccLim = max(tmp1, iccRes[i]);
-
-          tmp1 = (float)sqrt(cldLin / cldLin1);
-          tmp2 = 1.0f / (float)sqrt(cldLin * cldLin1);
-
-          alpha = 0.5f * (float)acos(iccLim);
-          beta = (float)atan(((float)tan(alpha)) * (tmp2 - tmp1) / (tmp2 + tmp1));
-
-          cplxWeight3[i].real = tmp2 * (float)cos(beta - alpha);
-          cplxWeight4[i].real = -tmp1 * (float)cos(beta + alpha);
-
-          cplxWeight1[i].real = 1.0f / (cplxWeight3[i].real - cplxWeight4[i].real);
-          cplxWeight1[i].real = max(0.0f, cplxWeight1[i].real);
-          cplxWeight2[i].real = cplxWeight1[i].real;
-          cplxWeight3[i].real *= cplxWeight1[i].real;
-          cplxWeight4[i].real *= cplxWeight1[i].real;
-
-          cplxWeight3[i].real *= 2.0f;
-          cplxWeight3[i].imag *= 2.0f;
-          cplxWeight4[i].real *= 2.0f;
-          cplxWeight4[i].imag *= 2.0f;
-        }
+        getClassicWeights(hTtoBox, nResidualBands, nParamBands, cld, icc, cplxWeight1, cplxWeight2, cplxWeight3, cplxWeight4);
       }
     } else {
-      const float maxWeight = (hTtoBox->ipdMode == IPDMODE_RESIDUAL) ? 1.2f : 2.0f;
+      if (hTtoBox->ipdMode != IPDMODE_RESIDUAL) {
+        maxWeight = 2.0f;
+      }
 
       switch (hTtoBox->downmixType) {
         case DOWNMIXTYPE_CLASSICMPS:
-          getClassicDownmixWeightsPar(0, nParamBands, cld, icc, maxWeight, cplxWeight1, cplxWeight2);
+          getDownmixWeightsPar(0, nParamBands, cld, icc, maxWeight, cplxWeight1, cplxWeight2);
           break;
         case DOWNMIXTYPE_SIMPLIFIED_ABOVE_RESIDUAL:
         case DOWNMIXTYPE_SIMPLIFIED:
@@ -1901,18 +1862,14 @@ static HANDLE_ERROR_INFO calculateTtoDownmixParamUsac(
 
     if ((hTtoBox->downmixType != DOWNMIXTYPE_SIMPLIFIED) && hTtoBox->bInterpolateDownmix) {
       for (i = nHybridBands - 1; i >= 0; i--) {
-        int pb = hTtoBox->pSubband2ParameterIndex[i];
+        int paramBand = hTtoBox->pSubband2ParameterIndex[i];
 
-        if (hTtoBox->downmixType != DOWNMIXTYPE_SIMPLIFIED_ABOVE_RESIDUAL || nResidualBands > pb) {
-          cplxWeight1[i].real = cplxWeight1[pb].real;
-          cplxWeight1[i].imag = cplxWeight1[pb].imag;
-          cplxWeight2[i].real = cplxWeight2[pb].real;
-          cplxWeight2[i].imag = cplxWeight2[pb].imag;
+        if (hTtoBox->downmixType != DOWNMIXTYPE_SIMPLIFIED_ABOVE_RESIDUAL || nResidualBands > paramBand) {
+          cplxWeight1[i] = cplxWeight1[paramBand];
+          cplxWeight2[i] = cplxWeight2[paramBand];
           if (bCalcResiduals) {
-            cplxWeight3[i].real = cplxWeight3[pb].real;
-            cplxWeight3[i].imag = cplxWeight3[pb].imag;
-            cplxWeight4[i].real = cplxWeight4[pb].real;
-            cplxWeight4[i].imag = cplxWeight4[pb].imag;
+            cplxWeight3[i] = cplxWeight3[paramBand];
+            cplxWeight4[i] = cplxWeight4[paramBand];
           }
         }
       }
@@ -1920,18 +1877,6 @@ static HANDLE_ERROR_INFO calculateTtoDownmixParamUsac(
   }
 
   return error;
-}
-
-int GetbKorSpeech(HANDLE_TTO_BOX *hTtoBox, int nOttBoxes) {
-  int bKorSpeech = 0;
-  int box;
-  for (box = 0; box < nOttBoxes; box++) {
-    bKorSpeech = hTtoBox[box]->bKorSpeech;
-    if (bKorSpeech) {
-      break;
-    }
-  }
-  return bKorSpeech;
 }
 
 HANDLE_ERROR_INFO ApplyTtoBox(
@@ -1955,7 +1900,7 @@ HANDLE_ERROR_INFO ApplyTtoBox(
     int *pbIccDiffPresent,
     int bUseBBCues,
     CLASSIC_MPS SPACETREE_MODE mode,
-    int speechFlag)
+    ABSTEREOSPEECH int speechFlag)
 
 {
   HANDLE_ERROR_INFO error = noError;
@@ -1964,6 +1909,8 @@ HANDLE_ERROR_INFO ApplyTtoBox(
 
   if (hTtoBox != NULL) {
     int nParamBands = hTtoBox->nParameterBands;
+    int nResidualBands = hTtoBox->nResidualBands;
+
     float *powerHybridData1 = hTtoBox->pPwrHybridData1;
     float *powerHybridData2 = hTtoBox->pPwrHybridData2;
     float *prodHybridDataReal = hTtoBox->pProdHybridDataReal;
@@ -1975,23 +1922,15 @@ HANDLE_ERROR_INFO ApplyTtoBox(
     float *prodHybridImag = hTtoBox->pProdHybridImag;
 
     if (error == noError) {
-      if ((nHybridBands < 0) ||
-          (nHybridBands > hTtoBox->nHybridBandsMax)) {
+      if ((nHybridBands < 0) || (nHybridBands > hTtoBox->nHybridBandsMax)) {
         error = iisUtil_ERROR(CDI, "Invalid number nHybridBands.");
       }
-    }
-
-    if (error == noError) {
       if (nTimeSlots > hTtoBox->nTimeSlotsMax) {
         error = iisUtil_ERROR(CDI, "Invalid nTimeSlots.");
       }
     }
 
     if (error == noError) {
-      {
-        nParamBands = hTtoBox->nParameterBands;
-      }
-
       setFLOAT(hTtoBox->epsilonFloat, powerHybridData1, hTtoBox->nParameterBands);
       setFLOAT(hTtoBox->epsilonFloat, powerHybridData2, hTtoBox->nParameterBands);
       setFLOAT(hTtoBox->epsilonFloat, prodHybridDataReal, hTtoBox->nParameterBands);
@@ -2010,7 +1949,7 @@ HANDLE_ERROR_INFO ApplyTtoBox(
           (ppHybridDataImag2 != NULL)) {
         for (j = 0; j < nHybridBands; j++) {
           int paramIndex = hTtoBox->pSubband2ParameterIndex[j];
-          float imagPartSign = (float)hTtoBox->pSubbandImagSign[j];
+          float imagSign = (float)hTtoBox->pSubbandImagSign[j];
 
           for (i = 0; i < nTimeSlots; i++) {
             if ((ppHybridDataReal1[i] != NULL) &&
@@ -2030,8 +1969,8 @@ HANDLE_ERROR_INFO ApplyTtoBox(
                          ppHybridDataImag2[i][j] * ppHybridDataImag2[i][j];
                 power12real = ppHybridDataReal1[i][j] * ppHybridDataReal2[i][j] +
                               ppHybridDataImag1[i][j] * ppHybridDataImag2[i][j];
-                power12imag = imagPartSign * ppHybridDataImag1[i][j] * ppHybridDataReal2[i][j] -
-                              ppHybridDataReal1[i][j] * imagPartSign * ppHybridDataImag2[i][j];
+                power12imag = imagSign * ppHybridDataImag1[i][j] * ppHybridDataReal2[i][j] -
+                              ppHybridDataReal1[i][j] * imagSign * ppHybridDataImag2[i][j];
 
                 powerHybrid1[j] += power1;
                 powerHybrid2[j] += power2;
@@ -2049,8 +1988,8 @@ HANDLE_ERROR_INFO ApplyTtoBox(
                                                 ppHybridDataImag2[i][j] * ppHybridDataImag2[i][j];
                 prodHybridDataReal[paramIndex] += ppHybridDataReal1[i][j] * ppHybridDataReal2[i][j] +
                                                   ppHybridDataImag1[i][j] * ppHybridDataImag2[i][j];
-                prodHybridDataImag[paramIndex] += imagPartSign * ppHybridDataImag1[i][j] * ppHybridDataReal2[i][j] -
-                                                  ppHybridDataReal1[i][j] * imagPartSign * ppHybridDataImag2[i][j];
+                prodHybridDataImag[paramIndex] += imagSign * ppHybridDataImag1[i][j] * ppHybridDataReal2[i][j] -
+                                                  ppHybridDataReal1[i][j] * imagSign * ppHybridDataImag2[i][j];
               }
             } else {
               error = iisUtil_ERROR(CDI, "Invalid pointer");
@@ -2063,25 +2002,23 @@ HANDLE_ERROR_INFO ApplyTtoBox(
       }
     }
 
-    if (!hTtoBox->bCalcNoIcc) {
-      SAFECALL(error,
-               calculateIcc(nParamBands, hTtoBox->iccCorrelationCoherenceBorder, powerHybridData1, powerHybridData2, prodHybridDataReal, prodHybridDataImag, hTtoBox->pIcc));
-    }
-
     SAFECALL(error, calculateIcc(nParamBands, nParamBands, powerHybridData1, powerHybridData2, prodHybridDataReal, prodHybridDataImag, hTtoBox->pIccDownmix));
 
     if (!hTtoBox->bCalcNoIcc) {
-      if ((hTtoBox->ipdMode != IPDMODE_NONE) && hTtoBox->bCalcResiduals) {
-        int pb;
+      SAFECALL(error,
+               calculateIcc(nParamBands, hTtoBox->iccCorrelationCoherenceBorder, powerHybridData1, powerHybridData2, prodHybridDataReal, prodHybridDataImag, hTtoBox->pIcc));
 
-        for (pb = 0; pb < hTtoBox->nResidualBands; pb++) {
-          hTtoBox->pIccDownmix[pb] = hTtoBox->pIcc[pb];
+      if ((hTtoBox->ipdMode != IPDMODE_NONE) && hTtoBox->bCalcResiduals) {
+        int paramBand;
+
+        for (paramBand = 0; paramBand < nResidualBands; paramBand++) {
+          hTtoBox->pIccDownmix[paramBand] = hTtoBox->pIcc[paramBand];
         }
       }
     }
 
     {
-      SAFECALL(error, CalculateCld(nParamBands, powerHybridData1, powerHybridData2, hTtoBox->pCld));
+      SAFECALL(error, calculateCld(nParamBands, powerHybridData1, powerHybridData2, hTtoBox->pCld));
     }
 
     if (hTtoBox->ipdMode != IPDMODE_NONE) {
@@ -2089,32 +2026,31 @@ HANDLE_ERROR_INFO ApplyTtoBox(
     }
 
     if (error == noError) {
-      hTtoBox->bKorSpeech = koreanDetector(hTtoBox, hTtoBox->nOttBandsPhase, speechFlag);
-
       if (hTtoBox->bStereoSbr && hTtoBox->bCalcResiduals) {
-        int nParamBandsCore;
-        int pb;
-        for (pb = 0; pb < nHybridBands; pb++) {
-          int paramIndex = hTtoBox->pSubband2ParameterIndex[pb];
-          int paramIndexAna = hTtoBox->pSubband2ParameterAnalysisIndex[pb];
+        int paramBand;
+        for (paramBand = 0; paramBand < nHybridBands; paramBand++) {
+          int paramIndex = hTtoBox->pSubband2ParameterIndex[paramBand];
+          int paramAnalysisIdx = hTtoBox->pSubband2ParameterAnalysisIndex[paramBand];
 
-          if (paramIndexAna < paramIndex) {
-            hTtoBox->pIcc[paramIndex] = hTtoBox->pIcc[paramIndexAna];
-            hTtoBox->pIccDownmix[paramIndex] = hTtoBox->pIccDownmix[paramIndexAna];
-            hTtoBox->pCld[paramIndex] = hTtoBox->pCld[paramIndexAna];
-            hTtoBox->pIpd[paramIndex] = hTtoBox->pIpd[paramIndexAna];
+          if (paramAnalysisIdx < paramIndex) {
+            hTtoBox->pIcc[paramIndex] = hTtoBox->pIcc[paramAnalysisIdx];
+            hTtoBox->pIccDownmix[paramIndex] = hTtoBox->pIccDownmix[paramAnalysisIdx];
+            hTtoBox->pCld[paramIndex] = hTtoBox->pCld[paramAnalysisIdx];
+            hTtoBox->pIpd[paramIndex] = hTtoBox->pIpd[paramAnalysisIdx];
           }
         }
 
+        int nParamBandsCore;
         nParamBandsCore = hTtoBox->pSubband2ParameterIndex[hTtoBox->nHybBandsCore] + 1;
-
+        float iccLastCore = hTtoBox->pIcc[nParamBandsCore - 1];
+        float cldLastCore = hTtoBox->pCld[nParamBandsCore - 1];
+        float ipdLastCore = hTtoBox->pIpd[nParamBandsCore - 1];
         for (i = nParamBandsCore; i < nParamBands; i++) {
-          hTtoBox->pIcc[i] = hTtoBox->pIcc[i - 1];
-          hTtoBox->pCld[i] = hTtoBox->pCld[i - 1];
+          hTtoBox->pIcc[i] = iccLastCore;
+          hTtoBox->pCld[i] = cldLastCore;
         }
-
         for (i = nParamBandsCore; i < hTtoBox->nOttBandsPhase; i++) {
-          hTtoBox->pIpd[i] = hTtoBox->pIpd[i - 1];
+          hTtoBox->pIpd[i] = ipdLastCore;
         }
       }
 
@@ -2133,7 +2069,7 @@ HANDLE_ERROR_INFO ApplyTtoBox(
           }
           hTtoBox->pIccDownmix[0] /= (float)nParamBands;
 
-          for (i = 1; i < hTtoBox->nResidualBands; i++) {
+          for (i = 1; i < nResidualBands; i++) {
             hTtoBox->pIccDownmix[i] = hTtoBox->pIccDownmix[0];
           }
         }
@@ -2173,7 +2109,6 @@ HANDLE_ERROR_INFO ApplyTtoBox(
         }
       }
     }
-
     if (error == noError) {
       if (!hTtoBox->bCalcNoIcc) {
         if (pbIccQuantCoarse != NULL) {
@@ -2206,16 +2141,17 @@ HANDLE_ERROR_INFO ApplyTtoBox(
     if (error == noError && hTtoBox->bUsac212) {
       if (hTtoBox->ipdMode != IPDMODE_NONE) {
         if (pIpdIdx != NULL) {
-          quantizeIpd(hTtoBox->pIpd, hTtoBox->nOttBandsPhase, hTtoBox->bUseCoarseQuantIpd, pIpdIdx);
-          deQuantizeIpd(pIpdIdx, hTtoBox->nOttBandsPhase, hTtoBox->bUseCoarseQuantIpd, hTtoBox->pIpdQuant);
+          int nQuantSteps = getIpdQuantSteps(hTtoBox->bUseCoarseQuantIpd);
+          quantizeIpd(hTtoBox->pIpd, hTtoBox->nOttBandsPhase, nQuantSteps, pIpdIdx);
+          deQuantizeIpd(pIpdIdx, hTtoBox->nOttBandsPhase, nQuantSteps, hTtoBox->pIpdQuant);
           *bsPhaseMode = applyPhaseCorrections(hTtoBox, pCldIdx, pIccIdx, pIpdIdx, bUseBBCues);
+
           *numBinsIPD = hTtoBox->nOttBandsPhase;
         } else {
           error = iisUtil_ERROR(CDI, "Invalid pointer to pIpdIdx.");
         }
       }
     }
-
     if (error == noError && hTtoBox->bUsac212) {
       if (!hTtoBox->bCalcNoIcc) {
         if (noError != (error = calculateTtoDownmixParamUsac(hTtoBox, nHybridBands))) {
@@ -2318,8 +2254,9 @@ GetTtoBoxDownmixMatrix(HANDLE_TTO_BOX hTtoBox,
                        int nHybridBands,
                        TTO_MIX_MATRIX *pDownmix) {
   HANDLE_ERROR_INFO error = noError;
-
-  if (hTtoBox != NULL) {
+  if (hTtoBox == NULL) {
+    error = iisUtil_ERROR(CDI, "Invalid handle hTtoBox");
+  } else {
     int bCalcResiduals = hTtoBox->bCalcResiduals;
 
     CPLX *cplxWeight1 = hTtoBox->pCplxDmWeight1;
@@ -2327,40 +2264,36 @@ GetTtoBoxDownmixMatrix(HANDLE_TTO_BOX hTtoBox,
     CPLX *cplxWeight3 = hTtoBox->pCplxDmWeight3;
     CPLX *cplxWeight4 = hTtoBox->pCplxDmWeight4;
 
-    int hb;
+    int hybBand;
 
     if ((NULL == cplxWeight1) || (NULL == cplxWeight2)) {
-      error = iisUtil_ERROR(CDI, "Parameter error.");
+      error = iisUtil_ERROR(CDI, "Invalid parameter cplxWeight1/2.");
     }
 
     if (bCalcResiduals && ((NULL == cplxWeight3) || (NULL == cplxWeight4))) {
-      error = iisUtil_ERROR(CDI, "Parameter error.");
+      error = iisUtil_ERROR(CDI, "Invalid parameter cplxWeight3/4.");
     }
-
-    if (noError == error) {
-      for (hb = 0; hb < nHybridBands; hb++) {
-        pDownmix[hb].m[0][0].real = cplxWeight1[hb].real;
-        pDownmix[hb].m[0][0].imag = cplxWeight1[hb].imag;
-        pDownmix[hb].m[0][1].real = cplxWeight2[hb].real;
-        pDownmix[hb].m[0][1].imag = cplxWeight2[hb].imag;
+    if (error == noError) {
+      for (hybBand = 0; hybBand < nHybridBands; hybBand++) {
+        pDownmix[hybBand].m[0][0].real = cplxWeight1[hybBand].real;
+        pDownmix[hybBand].m[0][0].imag = cplxWeight1[hybBand].imag;
+        pDownmix[hybBand].m[0][1].real = cplxWeight2[hybBand].real;
+        pDownmix[hybBand].m[0][1].imag = cplxWeight2[hybBand].imag;
 
         if (bCalcResiduals) {
-          pDownmix[hb].m[1][0].real = cplxWeight3[hb].real;
-          pDownmix[hb].m[1][0].imag = cplxWeight3[hb].imag;
-          pDownmix[hb].m[1][1].real = cplxWeight4[hb].real;
-          pDownmix[hb].m[1][1].imag = cplxWeight4[hb].imag;
+          pDownmix[hybBand].m[1][0].real = cplxWeight3[hybBand].real;
+          pDownmix[hybBand].m[1][0].imag = cplxWeight3[hybBand].imag;
+          pDownmix[hybBand].m[1][1].real = cplxWeight4[hybBand].real;
+          pDownmix[hybBand].m[1][1].imag = cplxWeight4[hybBand].imag;
         } else {
-          pDownmix[hb].m[1][0].real = 0.0f;
-          pDownmix[hb].m[1][0].imag = 0.0f;
-          pDownmix[hb].m[1][1].real = 0.0f;
-          pDownmix[hb].m[1][1].imag = 0.0f;
+          pDownmix[hybBand].m[1][0].real = 0.0f;
+          pDownmix[hybBand].m[1][0].imag = 0.0f;
+          pDownmix[hybBand].m[1][1].real = 0.0f;
+          pDownmix[hybBand].m[1][1].imag = 0.0f;
         }
-
-        pDownmix[hb].infinity = 0;
+        pDownmix[hybBand].infinity = 0;
       }
     }
-  } else {
-    error = iisUtil_ERROR(CDI, "Invalid handle hTtoBox");
   }
 
   return error;

@@ -385,7 +385,8 @@ iisDRCGainEnc_getNodesFromInputBuffer(HANDLE_IISDRCGAINENC_PARAMS hIisDrcGainEnc
   for (k = 0; k < hIisDrcGainEnc_params->gainSequenceCount; k++) {
     DrcGainSequence *pDrcGainSequence = &hIisDrcGainEnc_params->pUniDrcGain->pDrcGainSequence[k];
     if (pDrcGainSequence->gainCodingProfile != IISDRCGAINENC_GAINCODINGPROFILE_CONSTANT) {
-      retVal = pFuncSetNodesGeneric(&hIisDrcGainEnc_params->pUniDrcGain->pDrcGainSequence[k], drcGainInputBuffer[k], bIsPrerollFrame, hIisDrcGainEnc_params->frameSize);
+      int bIsPrerollFrame_used = bIsPrerollFrame;
+      retVal = pFuncSetNodesGeneric(&hIisDrcGainEnc_params->pUniDrcGain->pDrcGainSequence[k], drcGainInputBuffer[k], bIsPrerollFrame_used, hIisDrcGainEnc_params->frameSize);
       if (retVal != IISDRCGAINENC_RETURN_NOERROR) return retVal;
 
       if (pDrcGainSequence->fullFrame == 1) {

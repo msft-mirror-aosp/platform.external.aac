@@ -1537,7 +1537,8 @@ XHEAACENCLIB_RETURN XHEAACENCLIB_API IIS_xHEAACEncLib_Update(
 
         if (!isError(retValue)) {
           if (hInstance->hConfig->aot == AUD_OBJ_TYP_USAC) {
-            retValue = iisxHEAACEncLib_extentsionData_usacSetUse(&hInstance->extEleList, XHEAACENCLIB_EXT_ELE_USAC_UNI_DRC, 1, IISXHEAACENCLIB_DEFAULT_LENGTH_UNIDRC, pExtensionConfig, extensionConfigLength, 0);
+            unsigned int defaultLengthUniDrc = IISXHEAACENCLIB_DEFAULT_LENGTH_UNIDRC;
+            retValue = iisxHEAACEncLib_extentsionData_usacSetUse(&hInstance->extEleList, XHEAACENCLIB_EXT_ELE_USAC_UNI_DRC, 1, defaultLengthUniDrc, pExtensionConfig, extensionConfigLength, 0);
           } else {
             retValue = iisxHEAACEncLib_extensionData_generalSetUse(&hInstance->extEleList, hInstance->hConfig, XHEAACENCLIB_EXT_ELE_AAC_UNI_DRC, IISXHEAACENCLIB_DEFAULT_LENGTH_UNIDRC, -1);
           }

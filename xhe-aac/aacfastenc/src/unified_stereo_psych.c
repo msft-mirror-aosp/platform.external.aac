@@ -106,6 +106,9 @@ amm-info@iis.fraunhofer.de
 #include "unified_stereo_psych.h"
 #include "interface.h"
 
+#define LS_TRANS ((FRAME_LEN_LONG - FRAME_LEN_SHORT) / 2)
+#define N_TIME_STEPS 4
+
 void iisaacfenc_UniStePsyProcessing(
     float *sfbThresholdLeft,
     float *sfbThresholdRight,
@@ -144,102 +147,105 @@ void iisaacfenc_mapUniSteCldToPredGain(
     const int maxSfbPerGroup,
     const int *groupLen,
     float uniStePredGainSfb[MAX_SFB]) {
-  int i;
-  int k;
-  float paramBandBorders[28 + 1];
-  int sfb;
-  int sfboffs;
-  float umxMatSfbRe[MAX_SFB][4];
-  float umxMatSfbIm[MAX_SFB][4];
-
   if (hUniSte == 0) {
-    for (sfb = 0; sfb < sfbCnt; sfb += sfbPerGroup) {
-      for (sfboffs = 0; sfboffs < maxSfbPerGroup; sfboffs++) {
-        uniStePredGainSfb[sfb + sfboffs] = 1.0f;
-      }
-    }
+    setFLOAT(1.0f, uniStePredGainSfb, sfbCnt);
+    return;
+  }
+
+  int sfbOffset;
+  int sfb;
+
+  float umxMatSfbRe[MAX_SFB][N_TIME_STEPS];
+  float umxMatSfbIm[MAX_SFB][N_TIME_STEPS];
+  setFLOAT(0.0f, (float *)umxMatSfbRe, MAX_SFB * N_TIME_STEPS);
+  setFLOAT(0.0f, (float *)umxMatSfbIm, MAX_SFB * N_TIME_STEPS);
+
+  const float *MPSBandBorders;
+  int currMPSBandIdx;
+  if (windowSequence == SHORT_WINDOW) {
+    MPSBandBorders = hUniSte->paramBandBordersShort;
   } else {
-    int timeSlot;
-    static const int LS_TRANS = ((FRAME_LEN_LONG - FRAME_LEN_SHORT) / 2);
-    int pos;
-    int groupAcc = 0;
+    MPSBandBorders = hUniSte->paramBandBordersLong;
+  }
 
-    if (windowSequence == SHORT_WINDOW) {
-      memcpy(paramBandBorders, hUniSte->paramBandBordersShort, (hUniSte->nParamBands + 1) * sizeof(float));
-    } else {
-      memcpy(paramBandBorders, hUniSte->paramBandBordersLong, (hUniSte->nParamBands + 1) * sizeof(float));
-    }
+  assert(FRAME_LEN_LONG % 64 == 0 && FRAME_LEN_SHORT % 64 == 0);
+  int windowCenterIdx = 0;
+  int shortWindowIdx = 0;
+  switch (windowSequence) {
+    case LONG_WINDOW:
+    case STOPSTART_WINDOW:
+      windowCenterIdx = (2 * FRAME_LEN_LONG) / 64;
+      break;
+    case START_WINDOW:
+    case STOP_WINDOW:
+      windowCenterIdx = (FRAME_LEN_LONG + LS_TRANS) / 64;
+      break;
+    case SHORT_WINDOW:
+      windowCenterIdx = (FRAME_LEN_LONG + 64) / 64;
+      break;
+    default:
+      assert(0);
+      break;
+  }
 
-    switch (windowSequence) {
-      case LONG_WINDOW:
-      case STOPSTART_WINDOW:
-        timeSlot = (2 * FRAME_LEN_LONG) / 64;
-        break;
-      case START_WINDOW:
-      case STOP_WINDOW:
-        timeSlot = (FRAME_LEN_LONG + LS_TRANS) / 64;
-        break;
-      default:
-        timeSlot = -1;
-        break;
-    }
+  int currMPSBandBorder = 0;
+  for (sfbOffset = 0; sfbOffset < sfbCnt; sfbOffset += sfbPerGroup) {
+    for (sfb = 0; sfb < maxSfbPerGroup; sfb++) {
+      assert(sfbOffset + sfb < MAX_SFB);
 
-    for (sfb = 0; sfb < sfbCnt; sfb += sfbPerGroup) {
-      if (windowSequence == SHORT_WINDOW) {
-        timeSlot = (FRAME_LEN_LONG + 64 + groupAcc * FRAME_LEN_SHORT) / 64;
+      uniStePredGainSfb[sfbOffset + sfb] = 0.0f;
+
+      const int sfbStartLine = psyConf->sfbOffset[sfb];
+      const int sfbEndLine = min(psyConf->lowpassLine, psyConf->sfbOffset[sfb + 1]);
+
+      int MPSStartBand = -1;
+      int MPSEndBand = -1;
+      for (currMPSBandIdx = 0; currMPSBandIdx < hUniSte->nParamBands; currMPSBandIdx++) {
+        if (MPSBandBorders[currMPSBandIdx] > sfbStartLine && MPSStartBand == -1) {
+          MPSStartBand = currMPSBandIdx - 1;
+        }
+        if (MPSBandBorders[currMPSBandIdx] >= sfbEndLine && MPSStartBand != -1) {
+          MPSEndBand = currMPSBandIdx - 1;
+          break;
+        }
       }
 
-      for (sfboffs = 0; sfboffs < maxSfbPerGroup; sfboffs++) {
-        int sfbStartLine = psyConf->sfbOffset[sfboffs];
-        int sfbEndLine = min(psyConf->lowpassLine, psyConf->sfbOffset[sfboffs + 1]);
-        int paramBandFirst = -1;
-        int paramBandLast = -1;
-        assert(sfb + sfboffs < MAX_SFB);
+      unsigned int stopCondition = 0;
 
-        for (i = 0; i < hUniSte->nParamBands; i++) {
-          if (paramBandBorders[i] > sfbStartLine) {
-            paramBandFirst = i - 1;
-            break;
-          }
-        }
-
-        for (i = 0; i < hUniSte->nParamBands; i++) {
-          if (paramBandBorders[i] >= sfbEndLine) {
-            paramBandLast = i - 1;
-            break;
-          }
-        }
-
-        if ((paramBandFirst < hUniSte->nResidualBands) &&
-            (paramBandLast >= hUniSte->nResidualBands)) {
-          paramBandBorders[paramBandLast] = (float)sfbEndLine;
-          paramBandLast -= 1;
-        }
-
-        uniStePredGainSfb[sfb + sfboffs] = 0.0f;
-        for (k = 0; k < 4; k++) {
-          umxMatSfbRe[sfb + sfboffs][k] = umxMatSfbIm[sfb + sfboffs][k] = 0.0f;
-        }
-
-        pos = sfbStartLine;
-        for (i = paramBandFirst; i <= paramBandLast; i++) {
-          for (k = 0; k < 4; k++) {
-            umxMatSfbRe[sfb + sfboffs][k] += (min(sfbEndLine, paramBandBorders[i + 1]) - pos) * hUniSte->umxMatRe[timeSlot][i][k] / (sfbEndLine - sfbStartLine);
-            umxMatSfbIm[sfb + sfboffs][k] += (min(sfbEndLine, paramBandBorders[i + 1]) - pos) * hUniSte->umxMatIm[timeSlot][i][k] / (sfbEndLine - sfbStartLine);
-          }
-
-          uniStePredGainSfb[sfb + sfboffs] += (float)pow(10, (hUniSte->cld[timeSlot][i] > 0 ? -hUniSte->cld[timeSlot][i] : hUniSte->cld[timeSlot][i]) * 0.1f) * (min(sfbEndLine, paramBandBorders[i + 1]) - pos) / (sfbEndLine - sfbStartLine);
-
-          pos = (int)paramBandBorders[i + 1];
-        }
-
-        uniStePredGainSfb[sfb + sfboffs] = min(
-            (umxMatSfbRe[sfb + sfboffs][0] * umxMatSfbRe[sfb + sfboffs][0] +
-             umxMatSfbIm[sfb + sfboffs][0] * umxMatSfbIm[sfb + sfboffs][0]),
-            (umxMatSfbRe[sfb + sfboffs][2] * umxMatSfbRe[sfb + sfboffs][2] +
-             umxMatSfbIm[sfb + sfboffs][2] * umxMatSfbIm[sfb + sfboffs][2]));
+      if ((MPSStartBand < hUniSte->nResidualBands) &&
+          (MPSEndBand >= hUniSte->nResidualBands)) {
+        MPSEndBand -= 1;
+        stopCondition = 1;
       }
-      groupAcc += groupLen[sfb / sfbPerGroup];
+
+      currMPSBandBorder = sfbStartLine;
+      int sfbWidth = sfbEndLine - sfbStartLine;
+
+      for (currMPSBandIdx = MPSStartBand; currMPSBandIdx <= MPSEndBand; currMPSBandIdx++) {
+        if (currMPSBandIdx > sfbEndLine && stopCondition) break;
+
+        for (int currTimeStep = 0; currTimeStep < N_TIME_STEPS; currTimeStep++) {
+          umxMatSfbRe[sfbOffset + sfb][currTimeStep] += (min(sfbEndLine, MPSBandBorders[currMPSBandIdx + 1]) - currMPSBandBorder) * hUniSte->umxMatRe[windowCenterIdx][currMPSBandIdx][currTimeStep] / sfbWidth;
+          umxMatSfbIm[sfbOffset + sfb][currTimeStep] += (min(sfbEndLine, MPSBandBorders[currMPSBandIdx + 1]) - currMPSBandBorder) * hUniSte->umxMatIm[windowCenterIdx][currMPSBandIdx][currTimeStep] / sfbWidth;
+        }
+
+        float exponent = 0.0f;
+        if (hUniSte->cld[windowCenterIdx][currMPSBandIdx] > 0) {
+          exponent = -hUniSte->cld[windowCenterIdx][currMPSBandIdx];
+        } else {
+          exponent = hUniSte->cld[windowCenterIdx][currMPSBandIdx] * 0.1f;
+        }
+        exponent *= 0.1f;
+        float factor = (min(sfbEndLine, MPSBandBorders[currMPSBandIdx + 1]) - currMPSBandBorder);
+        uniStePredGainSfb[sfbOffset + sfb] += (float)pow(10, exponent) * factor / sfbWidth;
+
+        currMPSBandBorder = (int)MPSBandBorders[currMPSBandIdx + 1];
+      }
+
+      uniStePredGainSfb[sfbOffset + sfb] = min(
+          (umxMatSfbRe[sfbOffset + sfb][0] * umxMatSfbRe[sfbOffset + sfb][0] + umxMatSfbIm[sfbOffset + sfb][0] * umxMatSfbIm[sfbOffset + sfb][0]),
+          (umxMatSfbRe[sfbOffset + sfb][2] * umxMatSfbRe[sfbOffset + sfb][2] + umxMatSfbIm[sfbOffset + sfb][2] * umxMatSfbIm[sfbOffset + sfb][2]));
     }
+    windowCenterIdx += groupLen[shortWindowIdx++] * FRAME_LEN_SHORT / 64;
   }
 }

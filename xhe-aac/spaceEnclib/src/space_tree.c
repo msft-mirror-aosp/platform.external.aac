@@ -878,12 +878,6 @@ HANDLE_ERROR_INFO SpaceTree_GetDescription(HANDLE_SPACE_TREE hSpaceTree, SPACE_T
   return error;
 }
 
-int SpaceTree_GetbKorSpeech(HANDLE_SPACE_TREE hSpaceTree) {
-  int bKorSpeech = 0;
-  bKorSpeech = GetbKorSpeech(hSpaceTree->ttoBox, hSpaceTree->descr.nOttBoxes);
-  return bKorSpeech;
-}
-
 float SpaceTree_ParamBand2Freq(int nParamBands, int nSampleRate, int nParamBand, int nQmfBands) {
   return paramBand2Freq(nParamBands, nSampleRate, nParamBand, nQmfBands);
 }

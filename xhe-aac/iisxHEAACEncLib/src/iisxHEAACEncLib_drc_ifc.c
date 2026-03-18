@@ -334,48 +334,58 @@ configureEnc1(UniDrcConfig *pUniDrcConfig,
 
     uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].drcChannelGroupCount = 1;
 
-    uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications = (GainModifications *)iisCalloc(uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].drcChannelGroupCount, sizeof(GainModifications));
-    if (uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications == NULL) {
-      return 33;
-    }
-
-    g = 0;
-    {
-      uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pGainScalingPresent = (int *)iisCalloc(1, sizeof(int));
-      if (uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pGainScalingPresent == NULL) {
+    if ((setup->instructionSetup[n].drcSetEffect & IISDRCGAINENC_DRCSETEFFECT_BIT_DUCK_OTHER) || (setup->instructionSetup[n].drcSetEffect & IISDRCGAINENC_DRCSETEFFECT_BIT_DUCK_SELF)) {
+      uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pDuckingModifications = (DuckingModifications *)iisCalloc(uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].drcChannelCount, sizeof(DuckingModifications));
+      if (uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pDuckingModifications == NULL) {
         return 33;
       }
-      uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pAttenuationScaling = (float *)iisCalloc(1, sizeof(float));
-      if (uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pAttenuationScaling == NULL) {
-        return 33;
+      for (ch = 0; ch < baseChannelCount; ch++) {
+        uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pDuckingModifications[ch].duckingScalingPresent = 0;
       }
-      uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pAmplificationScaling = (float *)iisCalloc(1, sizeof(float));
-      if (uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pAmplificationScaling == NULL) {
-        return 33;
-      }
-      uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pGainOffsetPresent = (int *)iisCalloc(1, sizeof(int));
-      if (uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pGainOffsetPresent == NULL) {
-        return 33;
-      }
-      uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pGainOffset = (float *)iisCalloc(1, sizeof(float));
-      if (uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pGainOffset == NULL) {
+    } else {
+      uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications = (GainModifications *)iisCalloc(uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].drcChannelGroupCount, sizeof(GainModifications));
+      if (uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications == NULL) {
         return 33;
       }
 
-      uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].shapeFilterPresent = 0;
-      if (setup->instructionSetup[n].attenuationScaling != 1.f || setup->instructionSetup[n].amplificationScaling != 1.f) {
-        uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pGainScalingPresent[0] = 1;
-      } else {
-        uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pGainScalingPresent[0] = 0;
+      g = 0;
+      {
+        uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pGainScalingPresent = (int *)iisCalloc(1, sizeof(int));
+        if (uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pGainScalingPresent == NULL) {
+          return 33;
+        }
+        uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pAttenuationScaling = (float *)iisCalloc(1, sizeof(float));
+        if (uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pAttenuationScaling == NULL) {
+          return 33;
+        }
+        uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pAmplificationScaling = (float *)iisCalloc(1, sizeof(float));
+        if (uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pAmplificationScaling == NULL) {
+          return 33;
+        }
+        uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pGainOffsetPresent = (int *)iisCalloc(1, sizeof(int));
+        if (uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pGainOffsetPresent == NULL) {
+          return 33;
+        }
+        uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pGainOffset = (float *)iisCalloc(1, sizeof(float));
+        if (uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pGainOffset == NULL) {
+          return 33;
+        }
+
+        uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].shapeFilterPresent = 0;
+        if (setup->instructionSetup[n].attenuationScaling != 1.f || setup->instructionSetup[n].amplificationScaling != 1.f) {
+          uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pGainScalingPresent[0] = 1;
+        } else {
+          uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pGainScalingPresent[0] = 0;
+        }
+        uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pAttenuationScaling[0] = setup->instructionSetup[n].attenuationScaling;
+        uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pAmplificationScaling[0] = setup->instructionSetup[n].amplificationScaling;
+        if (setup->instructionSetup[n].gainOffset != 0.0f) {
+          uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pGainOffsetPresent[0] = 1;
+        } else {
+          uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pGainOffsetPresent[0] = 0;
+        }
+        uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pGainOffset[0] = setup->instructionSetup[n].gainOffset;
       }
-      uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pAttenuationScaling[0] = setup->instructionSetup[n].attenuationScaling;
-      uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pAmplificationScaling[0] = setup->instructionSetup[n].amplificationScaling;
-      if (setup->instructionSetup[n].gainOffset != 0.0f) {
-        uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pGainOffsetPresent[0] = 1;
-      } else {
-        uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pGainOffsetPresent[0] = 0;
-      }
-      uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].pGainModifications[g].pGainOffset[0] = setup->instructionSetup[n].gainOffset;
     }
     uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].limiterPeakTargetPresent = 0;
     uniDrcConfigExtensionTmp->pDrcInstructionsUniDrcV1[n].limiterPeakTarget = 0.0f;
@@ -599,20 +609,24 @@ DRC_IFC_RETURN iisxHEAACEncLib_drc_ifc_Delete(
       hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcCoefficientsUniDrcV1 = NULL;
 
       for (k = 0; k < hInstance->pUniDrcConfig->uniDrcConfigExtension.drcInstructionsUniDrcV1Count; k++) {
-        for (m = 0; m < hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].drcChannelGroupCount; m++) {
-          iisFree(hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications[m].pGainOffset);
-          hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications[m].pGainOffset = NULL;
-          iisFree(hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications[m].pGainOffsetPresent);
-          hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications[m].pGainOffsetPresent = NULL;
-          iisFree(hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications[m].pAmplificationScaling);
-          hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications[m].pAmplificationScaling = NULL;
-          iisFree(hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications[m].pAttenuationScaling);
-          hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications[m].pAttenuationScaling = NULL;
-          iisFree(hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications[m].pGainScalingPresent);
-          hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications[m].pGainScalingPresent = NULL;
+        if (hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications) {
+          for (m = 0; m < hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].drcChannelGroupCount; m++) {
+            iisFree(hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications[m].pGainOffset);
+            hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications[m].pGainOffset = NULL;
+            iisFree(hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications[m].pGainOffsetPresent);
+            hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications[m].pGainOffsetPresent = NULL;
+            iisFree(hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications[m].pAmplificationScaling);
+            hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications[m].pAmplificationScaling = NULL;
+            iisFree(hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications[m].pAttenuationScaling);
+            hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications[m].pAttenuationScaling = NULL;
+            iisFree(hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications[m].pGainScalingPresent);
+            hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications[m].pGainScalingPresent = NULL;
+          }
+          iisFree(hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications);
+          hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications = NULL;
         }
-        iisFree(hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications);
-        hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainModifications = NULL;
+        iisFree(hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pDuckingModifications);
+        hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pDuckingModifications = NULL;
         iisFree(hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainSetIndex);
         hInstance->pUniDrcConfig->uniDrcConfigExtension.pDrcInstructionsUniDrcV1[k].pGainSetIndex = NULL;
       }

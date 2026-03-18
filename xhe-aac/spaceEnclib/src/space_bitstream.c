@@ -567,18 +567,15 @@ WriteSpatialSpecificConfig(HANDLE_BIT_BUF bitstream, SPATIALSPECIFICCONFIG *spat
         }
       }
 
-      if (error == noError && spatialSpecificConfig->bsTreeConfig == TREE_USAC_212) {
-        if ((spatialSpecificConfig->bsIpdMode >> 2) > 0) {
-          error = iisUtil_ERROR(CDI, "Invalid IPD mode.");
+      if (error == noError) {
+        if (spatialSpecificConfig->bsIpdMode > IPDMODE_INVALID && spatialSpecificConfig->bsIpdMode <= IPDMODE_LAST) {
+          nBitsWritten += WriteBits(bitstream, spatialSpecificConfig->bsIpdMode > IPDMODE_NONE, 1);
         } else {
-          if (spatialSpecificConfig->bsIpdMode == 2) {
-            error = iisUtil_ERROR(CDI, "ERROR: m16921 syntax incompatible with IPD mode 2.\n");
-          }
-          nBitsWritten += WriteBits(bitstream, spatialSpecificConfig->bsIpdMode > 0, 1);
+          error = iisUtil_ERROR(CDI, "Invalid bsIpdMode.");
         }
       }
 
-      if (error == noError && spatialSpecificConfig->bsTreeConfig == TREE_USAC_212) {
+      if (error == noError) {
         if ((spatialSpecificConfig->bsOttBandsPhasePresent >> 1) > 0) {
           error = iisUtil_ERROR(CDI, "Invalid bsOttBandsPhasePresent.");
         } else {
@@ -586,7 +583,7 @@ WriteSpatialSpecificConfig(HANDLE_BIT_BUF bitstream, SPATIALSPECIFICCONFIG *spat
         }
       }
 
-      if (spatialSpecificConfig->bsOttBandsPhasePresent && spatialSpecificConfig->bsTreeConfig == TREE_USAC_212) {
+      if (spatialSpecificConfig->bsOttBandsPhasePresent) {
         if (error == noError) {
           if ((spatialSpecificConfig->bsOttBandsPhase >> 5) > 0) {
             error = iisUtil_ERROR(CDI, "Invalid bsOttBandsPhase.");
@@ -597,14 +594,16 @@ WriteSpatialSpecificConfig(HANDLE_BIT_BUF bitstream, SPATIALSPECIFICCONFIG *spat
       }
 
       if (spatialSpecificConfig->bsResidualCoding) {
-        if ((spatialSpecificConfig->residualConfig[0].bsResidualBands >> 5) > 0) {
-          error = iisUtil_ERROR(CDI, "Invalid downmix type.");
-        } else {
-          nBitsWritten += WriteBits(bitstream, spatialSpecificConfig->residualConfig[0].bsResidualBands, 5);
-        }
-
         if (error == noError) {
-          nBitsWritten += WriteBits(bitstream, spatialSpecificConfig->bsPseudoLr, 1);
+          if ((spatialSpecificConfig->residualConfig[0].bsResidualBands >> 5) > 0) {
+            error = iisUtil_ERROR(CDI, "Invalid bsResidualBands.");
+          } else {
+            nBitsWritten += WriteBits(bitstream, spatialSpecificConfig->residualConfig[0].bsResidualBands, 5);
+          }
+
+          if (error == noError) {
+            nBitsWritten += WriteBits(bitstream, spatialSpecificConfig->bsPseudoLr, 1);
+          }
         }
       }
     }

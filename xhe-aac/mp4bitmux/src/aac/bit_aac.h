@@ -100,6 +100,7 @@ amm-info@iis.fraunhofer.de
 
 #include "glob_con.h"
 #include "bit_buf.h"
+#include "mathlib.h"
 #include "iisArithEncoder.h"
 
 enum _si_bis {
@@ -363,11 +364,9 @@ int encodeCplxPredData(int sfbCnt,
                        const int *jsFlag,
                        const int *predCoeffRe, const int *predCoeffIm,
                        int *predCoeffPrevRe, int *predCoeffPrevIm,
-                       int *bPredCoeffRealOnly,
                        int bResetPredictors, int nGroupsPrev,
-                       int wSeq, int wSeqPrev,
+                       BLOCK_TYPE windowSequence, BLOCK_TYPE windowSequencePrev,
                        int sfbPerPredBand,
-                       int bSwap,
                        int bUsePrevFrame,
                        HANDLE_BIT_BUF hBitStream,
                        int const bUsacIndependenceFlag);

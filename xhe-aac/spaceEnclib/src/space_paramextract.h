@@ -192,7 +192,7 @@ typedef struct {
   int infinity;
 } TTO_MIX_MATRIX;
 
-HANDLE_ERROR_INFO CalculateCld(
+HANDLE_ERROR_INFO calculateCld(
     int const nParamBand,
     float const *const pPwr1,
     float const *const pPwr2,
@@ -273,7 +273,5 @@ int getNumHybBandsCore(const HANDLE_TTO_BOX hTtoBox);
 int getBStereoSbr(const HANDLE_TTO_BOX hTtoBox);
 
 float getUniSteCld(const HANDLE_TTO_BOX hTtoBox, int parameterBand);
-
-int GetbKorSpeech(HANDLE_TTO_BOX *hTtoBox, int nOttBoxes);
 
 #endif
