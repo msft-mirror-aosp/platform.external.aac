@@ -109,6 +109,7 @@ static const float k_max_val = 3.0f;
 
 #define SFB_PER_PRED_BAND (2)
 #define PRED_COEFF_CHANGED (0xFF)
+#define DELTA_LIMIT 60
 
 static void iisaacfenc_QuantizeRealPredCoeffs(float predCoefRe, int *predCoefReQ) {
   const int signRe = predCoefRe >= 0.0f ? 1 : -1;
@@ -174,6 +175,17 @@ static float iisaacfenc_calcRealPredictionCoefficient(float *mdctSpectrumMid,
     energySide = dotFLOAT(&mdctSpectrumSide[0], &mdctSpectrumSide[0], numLines);
     return covarianceMidSide / (energySide + FLT_MIN);
   }
+}
+
+static int limitCoef(int coef) {
+  const int limit = DELTA_LIMIT / 2;
+  if (coef > limit) {
+    coef = limit;
+  }
+  if (coef < -limit) {
+    coef = -limit;
+  }
+  return coef;
 }
 
 int iisaacfenc_rdOptimizeRealPred(const int sfbCnt,
@@ -278,7 +290,8 @@ int iisaacfenc_rdOptimizeRealPred(const int sfbCnt,
       for (sfb = sfboffs; sfb < sfboffs + maxSfbPerGroup; sfb += SFB_PER_PRED_BAND) {
         if (msMask[sfb]) {
           tmpCoeffRe = predCoeffReQ[sfb];
-          predCoeffReQ[sfb] = prevBandCoeffReQ + deltaReFreq[predBand];
+          predCoeffReQ[sfb] = limitCoef(prevBandCoeffReQ + deltaReFreq[predBand]);
+
           predBand++;
           prevBandCoeffReQ = predCoeffReQ[sfb];
 
@@ -302,7 +315,7 @@ int iisaacfenc_rdOptimizeRealPred(const int sfbCnt,
       for (sfb = sfboffs; sfb < sfboffs + maxSfbPerGroup; sfb += SFB_PER_PRED_BAND) {
         if (msMask[sfb]) {
           tmpCoeffRe = predCoeffReQ[sfb];
-          predCoeffReQ[sfb] = predCoeffPrevReQ[sfb] + deltaReTime[predBand];
+          predCoeffReQ[sfb] = limitCoef(predCoeffPrevReQ[sfb] + deltaReTime[predBand]);
           predBand++;
 
           if (tmpCoeffRe != predCoeffReQ[sfb]) {
